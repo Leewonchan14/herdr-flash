@@ -1,0 +1,30 @@
+[package]
+name = "herdr-flash"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "flash.nvim-style labeled jump, cursor and yank for Herdr pane copy"
+license = "MIT"
+repository = "https://github.com/Leewonchan14/herdr-flash"
+authors = ["WonChan Lee"]
+
+[[bin]]
+name = "herdr-flash"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+crossterm = "0.29"
+ratatui = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+unicode-width = "0.2"
+
+[dev-dependencies]
+pretty_assertions = "1"
+
+[profile.release]
+lto = true
+strip = true

@@ -1,0 +1,21 @@
+id = "Leewonchan14.herdr-flash"
+name = "herdr-flash"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "flash.nvim-style labeled jump, cursor and yank for Herdr pane copy (prefix+s)"
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["cargo", "build", "--release", "--locked"]
+
+[[actions]]
+id = "open"
+title = "Flash (jump & yank)"
+description = "Label the focused pane's visible text with at most five hints, jump, select and yank"
+command = ["./scripts/open-flash"]
+
+[[panes]]
+id = "flash"
+title = "herdr-flash"
+placement = "popup"
+command = ["./target/release/herdr-flash"]

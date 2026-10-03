@@ -1,0 +1,22 @@
+#!/bin/sh
+# Open the herdr-flash picker as a full-size popup over the focused pane.
+#
+# Prefer the invoking server binary, but fall back when Linux reports a replaced executable as
+# "... (deleted)" in HERDR_BIN_PATH.
+set -eu
+
+if [ -n "${HERDR_BIN_PATH:-}" ] && [ -x "$HERDR_BIN_PATH" ]; then
+    herdr_cli=$HERDR_BIN_PATH
+else
+    herdr_cli=$(command -v herdr) || {
+        echo "herdr-flash: cannot find a usable Herdr CLI" >&2
+        exit 127
+    }
+fi
+
+exec "$herdr_cli" plugin pane open \
+    --plugin Leewonchan14.herdr-flash \
+    --entrypoint flash \
+    --placement popup \
+    --width 100% \
+    --height 100%
