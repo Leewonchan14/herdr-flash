@@ -48,8 +48,12 @@ fn render_row(app: &App, row: usize, theme: &Theme) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut style: Option<Style> = None;
     let mut text = String::new();
-    for index in row_ref.start..row_ref.end {
-        let cell = cells[index];
+    for (index, cell) in cells
+        .iter()
+        .enumerate()
+        .take(row_ref.end)
+        .skip(row_ref.start)
+    {
         let hint = if app.phase() == Phase::Search {
             app.hint_at(index)
         } else {

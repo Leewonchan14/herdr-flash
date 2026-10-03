@@ -149,7 +149,10 @@ fn socket_path() -> Result<PathBuf> {
     if fallback.exists() {
         return Ok(fallback);
     }
-    bail!("HERDR_SOCKET_PATH is not set and {} does not exist", fallback.display())
+    bail!(
+        "HERDR_SOCKET_PATH is not set and {} does not exist",
+        fallback.display()
+    )
 }
 
 fn config_dir() -> Option<PathBuf> {

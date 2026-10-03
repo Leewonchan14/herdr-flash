@@ -374,7 +374,12 @@ impl App {
 
     fn refresh(&mut self) {
         self.matches = matcher::find_matches(&self.buffer, &self.query);
-        self.hints = hints::assign(&self.buffer, &self.matches, self.anchor_position(), &self.keys);
+        self.hints = hints::assign(
+            &self.buffer,
+            &self.matches,
+            self.anchor_position(),
+            &self.keys,
+        );
         self.message = if self.query.is_empty() {
             String::new()
         } else if self.matches.is_empty() {
@@ -534,10 +539,7 @@ mod tests {
         assert_eq!(app.matches().len(), 7);
         assert_eq!(app.hints().len(), 5);
         assert_eq!(
-            app.hints()
-                .iter()
-                .map(|hint| hint.key)
-                .collect::<Vec<_>>(),
+            app.hints().iter().map(|hint| hint.key).collect::<Vec<_>>(),
             ['a', 's', 'd', 'g', 'h']
         );
         assert_eq!(app.message(), "");
@@ -590,7 +592,10 @@ mod tests {
         app.handle_key(Key::Char('v'));
         assert_eq!(app.phase(), Phase::Select);
         type_keys(&mut app, "ee");
-        assert_eq!(app.handle_key(Key::Char('y')), Outcome::Copy("world".into()));
+        assert_eq!(
+            app.handle_key(Key::Char('y')),
+            Outcome::Copy("world".into())
+        );
     }
 
     #[test]

@@ -62,7 +62,9 @@ impl SocketClient {
         stream
             .write_all(payload.as_bytes())
             .context("failed to write the Herdr request")?;
-        stream.flush().context("failed to flush the Herdr request")?;
+        stream
+            .flush()
+            .context("failed to flush the Herdr request")?;
 
         let mut line = String::new();
         BufReader::new(stream)
@@ -71,8 +73,8 @@ impl SocketClient {
         if line.trim().is_empty() {
             bail!("{method} returned no response");
         }
-        let response: Value =
-            serde_json::from_str(&line).with_context(|| format!("{method} returned invalid JSON"))?;
+        let response: Value = serde_json::from_str(&line)
+            .with_context(|| format!("{method} returned invalid JSON"))?;
         if let Some(error) = response.get("error") {
             let code = error["code"].as_str().unwrap_or("unknown");
             let message = error["message"].as_str().unwrap_or("no message");
@@ -187,7 +189,8 @@ mod tests {
 
     #[test]
     fn read_visible_pane_shapes_the_request_and_parses_text() {
-        let body = r#"{"id":"x","result":{"type":"pane_read","read":{"text":"hello","revision":7}}}"#;
+        let body =
+            r#"{"id":"x","result":{"type":"pane_read","read":{"text":"hello","revision":7}}}"#;
         let (path, server) = one_shot_server(body);
         let mut client = SocketClient::connect(&path).unwrap();
         let pane = client.read_visible_pane("w1:p1").unwrap();
@@ -214,7 +217,8 @@ mod tests {
 
     #[test]
     fn api_errors_surface_the_code_and_message() {
-        let body = r#"{"id":"x","error":{"code":"pane_not_found","message":"pane w9:p9 not found"}}"#;
+        let body =
+            r#"{"id":"x","error":{"code":"pane_not_found","message":"pane w9:p9 not found"}}"#;
         let (path, server) = one_shot_server(body);
         let mut client = SocketClient::connect(&path).unwrap();
         let error = client.read_visible_pane("w9:p9").unwrap_err().to_string();

@@ -101,7 +101,10 @@ mod tests {
     #[test]
     fn parses_named_hex_and_indexed_colors() {
         assert_eq!(parse_color("magenta").unwrap(), Color::Magenta);
-        assert_eq!(parse_color("#3e68d7").unwrap(), Color::Rgb(0x3e, 0x68, 0xd7));
+        assert_eq!(
+            parse_color("#3e68d7").unwrap(),
+            Color::Rgb(0x3e, 0x68, 0xd7)
+        );
         assert_eq!(parse_color("42").unwrap(), Color::Indexed(42));
         assert!(parse_color("nope").is_err());
         assert!(parse_color("#12345").is_err());

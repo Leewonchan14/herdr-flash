@@ -84,10 +84,7 @@ impl Buffer {
                     row_start = buffer.cells.len();
                     row_cells = 0;
                 }
-                buffer.cells.push(Cell {
-                    ch,
-                    width: advance,
-                });
+                buffer.cells.push(Cell { ch, width: advance });
                 row_cells = row_cells.saturating_add(advance);
             }
             buffer.push_row(row_start, row_cells, row_index == 0);
@@ -153,17 +150,15 @@ impl Buffer {
 
     /// Row that owns a cell index.
     pub fn row_of(&self, cell_index: usize) -> usize {
-        match self
-            .rows
-            .binary_search_by(|row| {
-                if cell_index < row.start {
-                    std::cmp::Ordering::Greater
-                } else if cell_index >= row.end {
-                    std::cmp::Ordering::Less
-                } else {
-                    std::cmp::Ordering::Equal
-                }
-            }) {
+        match self.rows.binary_search_by(|row| {
+            if cell_index < row.start {
+                std::cmp::Ordering::Greater
+            } else if cell_index >= row.end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        }) {
             Ok(row) => row,
             Err(_) => self.last_row(),
         }

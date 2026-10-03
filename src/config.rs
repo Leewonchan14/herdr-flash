@@ -148,10 +148,7 @@ mod tests {
 
     #[test]
     fn more_than_five_hint_keys_are_truncated() {
-        let settings = compile(
-            toml::from_str(r#"hint_keys = "asdfghjkl""#).unwrap(),
-        )
-        .unwrap();
+        let settings = compile(toml::from_str(r#"hint_keys = "asdfghjkl""#).unwrap()).unwrap();
         assert_eq!(settings.hint_keys, ['a', 's', 'd', 'f', 'g']);
     }
 

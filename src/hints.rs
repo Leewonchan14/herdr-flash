@@ -106,7 +106,10 @@ mod tests {
         assert_eq!(matches.len(), 9);
         let hints = assign(&buffer, &matches, (0, 0), &keys());
         assert_eq!(hints.len(), MAX_HINTS);
-        assert_eq!(hints.iter().map(|hint| hint.key).collect::<Vec<_>>(), keys());
+        assert_eq!(
+            hints.iter().map(|hint| hint.key).collect::<Vec<_>>(),
+            keys()
+        );
         assert_eq!(
             hints
                 .iter()
