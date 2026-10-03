@@ -1,6 +1,6 @@
 # herdr-flash
 
-`prefix+s` → **flash.nvim-style jump and yank for the focused Herdr pane**: type a query, every
+`prefix+shift+s` → **flash.nvim-style jump and yank for the focused Herdr pane**: type a query, every
 match lights up, at most **five one-key hints** appear on the nearest hits, one key lands the
 cursor, vim motions extend a selection, `y` copies it through OSC 52.
 
@@ -47,18 +47,18 @@ Bind the action:
 
 ```toml
 [[keys.command]]
-key = "prefix+s"
+key = "prefix+shift+s"
 type = "plugin_action"
 command = "Leewonchan14.herdr-flash.open"
 description = "Flash (jump & yank)"
 ```
 
-> `prefix+s` is Herdr's default binding for the **Settings** overlay. Binding flash there replaces
-> it; move Settings to another key if you use it.
+> `prefix+shift+s` is unbound in Herdr's defaults, so nothing is overridden. `prefix+s` (the
+> Settings overlay) stays free.
 
 ## Usage
 
-Press `prefix+s` on any pane. The picker takes over the screen with that pane's visible text.
+Press `prefix+shift+s` on any pane. The picker takes over the screen with that pane's visible text.
 
 | Phase | Key | Action |
 |---|---|---|
@@ -114,7 +114,7 @@ status_fg = "gray"
 
 ## How it works
 
-1. `prefix+s` runs the `open` action → `scripts/open-flash` → `herdr plugin pane open --placement
+1. `prefix+shift+s` runs the `open` action → `scripts/open-flash` → `herdr plugin pane open --placement
    popup --width 100% --height 100%`.
 2. The popup reads the focused pane's **visible** buffer (`pane.read source=visible strip_ansi`),
    plus the pane's layout width (`pane.layout`) for wrapping. The capture is frozen at open time, so
@@ -166,12 +166,12 @@ python3 scripts/lab-e2e.py
 ```
 
 It starts `herdr --session herdr-flash-lab`, types a fixture into a pane, drives
-`prefix+s` → query → hint → `v` → `e` → `y`, then asserts that the yank landed (native clipboard
+`prefix+shift+s` → query → hint → `v` → `e` → `y`, then asserts that the yank landed (native clipboard
 locally, OSC 52 over SSH) and that the plugin's state log recorded `outcome=copy`.
 
 ## 한국어 요약
 
-- `prefix+s` 를 누르면 현재 pane의 **보이는 화면**을 캡처한 flash 피커가 전체화면 팝업으로 열립니다.
+- `prefix+shift+s` 를 누르면 현재 pane의 **보이는 화면**을 캡처한 flash 피커가 전체화면 팝업으로 열립니다.
 - 검색어를 입력하면 일치하는 위치가 강조되고, **가장 가까운 최대 5개**에만 `a s d g h` 한 글자 힌트가 붙습니다.
 - 힌트를 누르면 커서가 그 위치로 이동하고, `v`/`V` 로 선택한 뒤 `y` 로 클립보드에 복사합니다(OSC 52).
 - 기존 `herdr-leap` 이 실패한 이유: 릴리스된 Herdr에 존재하지 않는 `pane.copy_mode_jump` API를 호출합니다

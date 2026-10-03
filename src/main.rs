@@ -21,7 +21,7 @@ fn main() -> Result<()> {
                      \n\
                      Usage: herdr-flash\n\
                      \n\
-                     Run through the Herdr plugin popup (prefix+s):\n\
+                     Run through the Herdr plugin popup (prefix+shift+s):\n\
                      \x20 herdr plugin action invoke Leewonchan14.herdr-flash.open\n\
                      \n\
                      Environment: HERDR_SOCKET_PATH, HERDR_PLUGIN_CONTEXT_JSON,\n\

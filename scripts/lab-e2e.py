@@ -2,7 +2,7 @@
 """End-to-end proof for herdr-flash in an isolated named Herdr session.
 
 Drives a real Herdr client in a PTY: types a fixture into a pane, invokes the plugin popup with
-prefix+s, types a query, picks a hint, selects a word and yanks it. Asserts:
+prefix+shift+s, types a query, picks a hint, selects a word and yanks it. Asserts:
 
   * the popup rendered the captured pane text,
   * the yank reached the client as an OSC 52 sequence carrying the expected text,
@@ -159,7 +159,7 @@ def main():
             failures.append(f"fixture text did not reach the pane viewport: {visible[:200]!r}")
 
         # prefix (ctrl+a) + s -> flash popup.
-        lab.send("\x01s", settle=1.0)
+        lab.send("\x01S", settle=1.0)
         if not lab.wait_for_text("herdr-flash"):
             failures.append("the flash popup never opened")
         if not lab.wait_for_text(EXPECTED):

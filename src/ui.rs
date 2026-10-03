@@ -197,6 +197,8 @@ mod tests {
     use crate::buffer::Buffer;
     use crate::hints::{sanitize_keys, DEFAULT_HINT_KEYS};
     use pretty_assertions::assert_eq;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
 
     fn app(text: &str) -> App {
         App::new(
@@ -204,6 +206,77 @@ mod tests {
             sanitize_keys(DEFAULT_HINT_KEYS),
             Theme::default(),
         )
+    }
+
+    /// Render into a test terminal and return the screen rows as plain text.
+    fn screen(app: &mut App, width: u16, height: u16) -> Vec<String> {
+        cells(app, width, height)
+            .into_iter()
+            .map(|row| row.concat())
+            .collect()
+    }
+
+    /// Render into a test terminal and return one string per display cell.
+    fn cells(app: &mut App, width: u16, height: u16) -> Vec<Vec<String>> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw(frame, app)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| {
+                        buffer
+                            .cell((x, y))
+                            .map(|cell| cell.symbol().to_string())
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn hint_labels_are_drawn_over_the_match_starts() {
+        let mut app = app("alpha beta gamma");
+        app.handle_key(Key::Char('a'));
+        let rows = screen(&mut app, 120, 4);
+        assert_eq!(rows[0].trim_end(), "alphs betd ggmmh");
+        assert!(rows[3].contains("hints a s d g h"), "{:?}", rows[3]);
+    }
+
+    #[test]
+    fn a_wide_match_start_keeps_the_cell_grid_aligned() {
+        let mut app = app("한글abc");
+        app.handle_key(Key::Char('글'));
+        let rows = cells(&mut app, 20, 3);
+        // The label replaces both cells of the wide 글; the rest of the row keeps its columns.
+        assert_eq!(rows[0][0], "한");
+        assert_eq!(rows[0][2], "a");
+        assert_eq!(rows[0][3], " ");
+        assert_eq!(rows[0][4], "a");
+        assert_eq!(rows[0][5], "b");
+        assert_eq!(rows[0][6], "c");
+    }
+
+    #[test]
+    fn an_empty_capture_and_a_one_row_terminal_render_without_panicking() {
+        let mut app = app("");
+        let rows = screen(&mut app, 20, 3);
+        assert_eq!(rows.len(), 3);
+        app.handle_key(Key::Char('x'));
+        let rows = screen(&mut app, 3, 1);
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn the_cursor_phase_marks_the_cursor_cell() {
+        let mut app = app("hello world");
+        app.handle_key(Key::Char('w'));
+        app.handle_key(Key::Char('o'));
+        app.handle_key(Key::Enter);
+        let rows = screen(&mut app, 40, 3);
+        // The cursor sits on the 'o' of "world" (1-based 1:7 in the status line).
+        assert!(rows[2].contains("cursor 1:7"), "{:?}", rows[2]);
     }
 
     #[test]
