@@ -20,6 +20,8 @@ own cursor on the picked target, and yanks a vim selection through OSC 52.
 
 ## Project shape
 
+- The documented default binding is `prefix+shift+s` (`prefix+s` is Herdr's Settings overlay and
+  must stay free). README, manifest description and `scripts/lab-e2e.py` must agree on it.
 - `herdr-plugin.toml` — plugin manifest. Keep the plugin id (`Leewonchan14.herdr-flash`), the action
   command, the pane entrypoint and the binary name in sync. `open` → `scripts/open-flash` →
   `herdr plugin pane open --placement popup --width 100% --height 100%` → entrypoint `flash`.
