@@ -31,7 +31,7 @@ wanted (jump to what you see, take it) without depending on an API that does not
 ## Install
 
 ```bash
-herdr plugin install Leewonchan14/herdr-flash   # builds with cargo (needs a Rust toolchain)
+herdr plugin install Leewonchan14/herdr-flash   # the Herdr server runs the build: cargo must be on its PATH
 herdr server reload-config
 ```
 
