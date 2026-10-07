@@ -137,7 +137,7 @@ pub fn status_line(app: &App, width: usize) -> (String, String) {
         Phase::Cursor => {
             let (row, col) = app.cursor_position();
             format!(
-                "flash · cursor {}:{} · v select · V line · y yank · backspace search · esc exit",
+                "flash · copy {}:{} · n/N match · v select · y copy · / search · esc exit",
                 row + 1,
                 col + 1
             )
@@ -146,7 +146,7 @@ pub fn status_line(app: &App, width: usize) -> (String, String) {
             let (row, col) = app.cursor_position();
             let kind = if app.linewise() { "line" } else { "char" };
             format!(
-                "flash · select ({kind}) {}:{} · y yank · o swap · esc clear",
+                "flash · copy ({kind}) {}:{} · y copy · o swap · esc clear",
                 row + 1,
                 col + 1
             )
@@ -298,7 +298,7 @@ mod tests {
         app.handle_key(Key::Enter);
         let rows = screen(&mut app, 40, 3);
         // The cursor sits on the 'o' of "world" (1-based 1:7 in the status line).
-        assert!(rows[2].contains("cursor 1:7"), "{:?}", rows[2]);
+        assert!(rows[2].contains("copy 1:7"), "{:?}", rows[2]);
     }
 
     #[test]
@@ -362,6 +362,6 @@ mod tests {
         app.handle_key(Key::Char('o'));
         app.handle_key(Key::Enter);
         let (status, _) = status_line(&app, 120);
-        assert!(status.contains("cursor 1:7"), "{status}");
+        assert!(status.contains("copy 1:7"), "{status}");
     }
 }

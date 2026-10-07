@@ -59,6 +59,8 @@ description = "Flash (jump & yank)"
 ## Usage
 
 Press `prefix+shift+s` on any pane. The picker takes over the screen with that pane's visible text.
+Picking a hint drops you into the picker's **copy mode** at that cell: motions, `n`/`N` between
+matches, `v`/`V` selections, and `y` to copy the selection or the match under the cursor.
 
 | Phase | Key | Action |
 |---|---|---|
@@ -72,9 +74,11 @@ Press `prefix+shift+s` on any pane. The picker takes over the screen with that p
 | cursor | `g g` / `G` | first line / last line |
 | cursor | `Ctrl-u` `Ctrl-d`, `PageUp` `PageDown` | half page / page |
 | cursor | `v` / `V` | start charwise / linewise selection |
+| cursor | `n` / `N` | next / previous match (wraps) |
+| cursor | `y` or `Enter` | yank the match under the cursor |
 | select | `o` | swap cursor and anchor |
 | select | `y` or `Enter` | yank the selection to the clipboard |
-| cursor / select | `Backspace` | back to the search, query intact |
+| cursor / select | `/` `?` / `Backspace` | back to the search, query intact |
 | cursor / select | `Esc` | clear the selection, or leave |
 
 The yank closes the picker (set `exit_on_yank = false` to keep it open for several grabs). Copying

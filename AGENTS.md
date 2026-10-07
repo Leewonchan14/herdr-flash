@@ -35,7 +35,9 @@ own cursor on the picked target, and yanks a vim selection through OSC 52.
 - `src/matcher.rs` — literal smart-case matching per logical line.
 - `src/hints.rs` — hint keys (sanitized to five) and nearest-first label assignment.
 - `src/app.rs` — the pure state machine (`Search` → `Cursor`/`Select` → `Copy`/`Cancel`), motions
-  and selection extraction. No terminal or socket I/O, so `handle_key` is unit-testable.
+  and selection extraction. The `Cursor`/`Select` phases are the picker's copy mode: `n`/`N` walk
+  the matches, `y` copies the selection or the match under the cursor, and `/` goes back to search.
+  No terminal or socket I/O, so `handle_key` is unit-testable.
 - `src/ui.rs` — ratatui rendering: dimmed buffer, match highlight, hint labels over match starts,
   cursor, selection, and the width-clamped status line.
 - `src/config.rs` / `src/theme.rs` — `$HERDR_PLUGIN_CONFIG_DIR/config.toml`, colors as named values,

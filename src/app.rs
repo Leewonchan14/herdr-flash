@@ -2,7 +2,7 @@
 //!
 //! All logic here is pure (no terminal or socket I/O), so `handle_key` is fully unit-testable.
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, Span};
 use crate::hints::{self, Hint};
 use crate::matcher;
 use crate::theme::Theme;
@@ -253,7 +253,7 @@ impl App {
                 Outcome::Cancel
             }
             Key::Ctrl('c') => Outcome::Cancel,
-            Key::Backspace => {
+            Key::Backspace | Key::Char('/') | Key::Char('?') => {
                 self.phase = Phase::Search;
                 self.anchor = None;
                 self.linewise = false;
@@ -262,10 +262,23 @@ impl App {
             }
             Key::Enter | Key::Char('y') => {
                 if self.anchor.is_none() {
-                    self.message = "no selection: press v to start one".to_string();
+                    if let Some(span) = self.match_at_cursor() {
+                        return Outcome::Copy(
+                            self.buffer.extract_indices(span.start, span.end - 1),
+                        );
+                    }
+                    self.message = "no match under the cursor · press v to select".to_string();
                     return Outcome::Continue;
                 }
                 Outcome::Copy(self.yank_text())
+            }
+            Key::Char('n') => {
+                self.move_to_match(true);
+                Outcome::Continue
+            }
+            Key::Char('N') => {
+                self.move_to_match(false);
+                Outcome::Continue
             }
             Key::Char('v') => {
                 if self.phase == Phase::Select && !self.linewise {
@@ -399,6 +412,36 @@ impl App {
         } else {
             String::new()
         };
+    }
+
+    /// The match that covers the cursor cell, if any.
+    fn match_at_cursor(&self) -> Option<Span> {
+        self.matches
+            .iter()
+            .find(|span| self.cursor >= span.start && self.cursor < span.end)
+            .copied()
+    }
+
+    /// Walk to the next (or previous) match, wrapping like vim's `n`/`N`.
+    fn move_to_match(&mut self, forward: bool) {
+        let target = if forward {
+            self.matches
+                .iter()
+                .find(|span| span.start > self.cursor)
+                .map(|span| span.start)
+                .or_else(|| self.matches.first().map(|span| span.start))
+        } else {
+            self.matches
+                .iter()
+                .rev()
+                .find(|span| span.start < self.cursor)
+                .map(|span| span.start)
+                .or_else(|| self.matches.last().map(|span| span.start))
+        };
+        match target {
+            Some(start) => self.move_to(start),
+            None => self.message = "no match".to_string(),
+        }
     }
 
     fn jump(&mut self, cell_index: usize) {
@@ -683,12 +726,53 @@ mod tests {
     }
 
     #[test]
-    fn yank_without_a_selection_keeps_the_picker_open() {
-        let mut app = app("abcdef");
-        type_keys(&mut app, "cd");
+    fn n_and_n_walk_the_matches_from_the_cursor() {
+        let mut app = app("one two one two one");
+        type_keys(&mut app, "one");
         app.handle_key(Key::Char('a'));
+        assert_eq!(app.phase(), Phase::Cursor);
+        assert_eq!(app.cursor_position(), (0, 0));
+        app.handle_key(Key::Char('n'));
+        assert_eq!(app.cursor_position(), (0, 8));
+        app.handle_key(Key::Char('n'));
+        assert_eq!(app.cursor_position(), (0, 16));
+        // vim wraps the scan
+        app.handle_key(Key::Char('n'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        app.handle_key(Key::Char('N'));
+        assert_eq!(app.cursor_position(), (0, 16));
+    }
+
+    #[test]
+    fn y_without_a_selection_copies_the_match_under_the_cursor() {
+        let mut app = app("one two one");
+        type_keys(&mut app, "two");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.cursor_position(), (0, 4));
+        assert_eq!(app.handle_key(Key::Char('y')), Outcome::Copy("two".into()));
+    }
+
+    #[test]
+    fn y_off_a_match_keeps_the_picker_open() {
+        let mut app = app("one two one");
+        type_keys(&mut app, "two");
+        app.handle_key(Key::Char('a'));
+        type_keys(&mut app, "lll");
+        assert_eq!(app.cursor_position(), (0, 7));
         assert_eq!(app.handle_key(Key::Char('y')), Outcome::Continue);
-        assert!(app.message().contains("no selection"));
+        assert!(app.message().contains("no match under the cursor"));
+    }
+
+    #[test]
+    fn slash_returns_to_the_search_with_the_query_intact() {
+        let mut app = app("one two one");
+        type_keys(&mut app, "two");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.phase(), Phase::Cursor);
+        app.handle_key(Key::Char('/'));
+        assert_eq!(app.phase(), Phase::Search);
+        assert_eq!(app.query(), "two");
+        assert_eq!(app.hints().len(), 1);
     }
 
     #[test]
