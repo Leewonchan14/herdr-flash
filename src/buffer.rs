@@ -64,11 +64,11 @@ pub struct Buffer {
 
 impl Buffer {
     /// Wrap `text` into a visual grid. `wrap_width` of `None` or `0` keeps one row per logical
-    /// line.
+    /// line. A trailing newline terminates the last row and does not add a row of its own.
     pub fn from_text(text: &str, wrap_width: Option<usize>) -> Self {
         let width = wrap_width.filter(|width| *width > 0).unwrap_or(usize::MAX);
         let mut buffer = Buffer::default();
-        for logical in text.split('\n') {
+        for logical in text.strip_suffix('\n').unwrap_or(text).split('\n') {
             let line_start = buffer.cells.len();
             let mut row_start = buffer.cells.len();
             let mut row_cells: u16 = 0;
@@ -459,6 +459,16 @@ mod tests {
         assert_eq!(buffer.row_count(), 3);
         assert_eq!(buffer.row_text(1), "");
         assert_eq!(buffer.extract((0, 0), (2, 0)), "a\n\nb");
+    }
+
+    #[test]
+    fn a_trailing_newline_does_not_add_a_row() {
+        // `pane.read` returns the capture newline-terminated; a phantom last row would break the
+        // bottom-up alignment in `merge_soft_wraps`.
+        assert_eq!(Buffer::from_text("abc\n", None).row_count(), 1);
+        assert_eq!(Buffer::from_text("abc\n\n", None).row_count(), 2);
+        assert_eq!(Buffer::from_text("\n", None).row_count(), 1);
+        assert_eq!(Buffer::from_text("abc\r\n", None).row_text(0), "abc");
     }
 
     #[test]
