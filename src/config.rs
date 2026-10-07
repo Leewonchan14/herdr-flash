@@ -23,7 +23,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             hint_keys: sanitize_keys(DEFAULT_HINT_KEYS),
-            exit_on_yank: false,
+            exit_on_yank: true,
             copy_toast: true,
             theme: Theme::default(),
         }
@@ -119,10 +119,9 @@ mod tests {
     fn defaults_use_five_hint_keys() {
         let settings = Settings::default();
         assert_eq!(settings.hint_keys, ['a', 's', 'd', 'g', 'h']);
-        assert!(
-            !settings.exit_on_yank,
-            "a yank stays in copy mode by default"
-        );
+        // Herdr's copy mode cannot be entered from a plugin, so a yank closes the picker instead of
+        // leaving flash mode on screen.
+        assert!(settings.exit_on_yank);
         assert!(settings.copy_toast);
     }
 
@@ -132,7 +131,7 @@ mod tests {
             toml::from_str(
                 r##"
                 hint_keys = "jkl;"
-                exit_on_yank = true
+                exit_on_yank = false
                 copy_toast = false
                 [style]
                 hint_bg = "#ff007c"
@@ -143,7 +142,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.hint_keys, ['j', 'k', 'l', ';']);
-        assert!(settings.exit_on_yank);
+        assert!(!settings.exit_on_yank);
         assert!(!settings.copy_toast);
         assert_eq!(settings.theme.hint.bg, Some(Color::Rgb(0xff, 0x00, 0x7c)));
         assert_eq!(settings.theme.matched.bg, Some(Color::Blue));
