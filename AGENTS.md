@@ -13,7 +13,9 @@ own cursor on the picked target, and yanks a vim selection through OSC 52.
   `pane.send_keys` / `pane.send_text` / `pane.scroll` / `pane.focus` — the picker must not move,
   type into, or scroll the pane it captured.
 - **At most five hints** (`hints::MAX_HINTS`). The configured alphabet is truncated to five keys and
-  only the five nearest matches are labelled. Do not add a two-key label fallback.
+  only the five nearest matches are labelled. Do not add a two-key label fallback. Labels never use
+  a key that would extend the current query (`hints::blocked_keys`): typing must not double as a
+  jump.
 - Clipboard writes are OSC 52 only (`clipboard::write_osc52`), never platform tools.
 - Keep the lineage credit to `RooseveltAdvisors/herdr-leap`, `IngoMeyer441/tmux-easy-motion`,
   `ddzero2c/tmux-easymotion` and `schasse/tmux-jump` in README and LICENSE notes.

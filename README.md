@@ -62,7 +62,7 @@ Press `prefix+shift+s` on any pane. The picker takes over the screen with that p
 
 | Phase | Key | Action |
 |---|---|---|
-| search | any character | extend the query (a live hint key jumps instead) |
+| search | any character | extend the query (labels avoid the characters that would extend it) |
 | search | `Backspace` | widen the query |
 | search | `Enter` | jump to the nearest match |
 | search | `Esc` / `Ctrl-C` | cancel |
@@ -86,6 +86,9 @@ clipboard).
 - Labels come from `hint_keys` (default `asdgh` — the head of tmux-easy-motion's default alphabet).
 - **Only the first five keys are used, and only five targets are labelled.** More matches stay
   highlighted but unlabelled; type more of the query to bring a distant hit into range.
+- A key that could extend the current query is never a label, so typing never doubles as a jump:
+  the cell right after a match is the only character a keystroke can append and still match, and
+  those keys stay typeable.
 - Targets are ranked by distance from the bottom of the screen (where the prompt and Herdr's copy
   cursor start), and labelled nearest-first, so `a` is always the closest hit.
 - Matching is literal and smart-case (any uppercase character makes the search case-sensitive),

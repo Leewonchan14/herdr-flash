@@ -5,6 +5,10 @@
 //! anchor — the bottom of the visible screen, where the shell prompt and the copy-mode cursor
 //! start — and labelled nearest-first, so `a` is always the closest hit (tmux-easymotion's
 //! "closer matches get shorter hints").
+//!
+//! A key that could extend the query is never used as a label: the only character a keystroke can
+//! append and still match is the one after an existing match, so those keys stay typeable and
+//! typing never doubles as a jump.
 
 use crate::buffer::{Buffer, Span};
 
@@ -35,8 +39,19 @@ pub fn sanitize_keys(configured: &str) -> Vec<char> {
     keys
 }
 
-/// Label up to `keys.len()` matches, nearest to `anchor` first.
-pub fn assign(buffer: &Buffer, matches: &[Span], anchor: (usize, u16), keys: &[char]) -> Vec<Hint> {
+/// Label up to `keys.len()` matches, nearest to `anchor` first, skipping `blocked` keys.
+pub fn assign(
+    buffer: &Buffer,
+    matches: &[Span],
+    anchor: (usize, u16),
+    keys: &[char],
+    blocked: &[char],
+) -> Vec<Hint> {
+    let keys: Vec<char> = keys
+        .iter()
+        .copied()
+        .filter(|key| !blocked.contains(key))
+        .collect();
     if matches.is_empty() || keys.is_empty() {
         return Vec::new();
     }
@@ -52,6 +67,45 @@ pub fn assign(buffer: &Buffer, matches: &[Span], anchor: (usize, u16), keys: &[c
         .zip(keys.iter().copied())
         .map(|(span, key)| Hint { key, span })
         .collect()
+}
+
+/// Label keys that would extend the query instead of picking a match, so they must stay typeable.
+///
+/// Appending a character keeps a match alive only when that character is the cell right after an
+/// existing match; those keys are the typing candidates. `case_sensitive` mirrors the matcher's
+/// smart-case rule: appending an uppercase key makes the query case-sensitive, while a lowercase
+/// key against a lowercase query matches either case.
+pub fn blocked_keys(
+    buffer: &Buffer,
+    matches: &[Span],
+    keys: &[char],
+    case_sensitive: bool,
+) -> Vec<char> {
+    let cells = buffer.cells();
+    let mut blocked: Vec<char> = Vec::new();
+    for span in matches {
+        if span.is_empty() {
+            continue;
+        }
+        let Some(next) = buffer.next_char(span.end - 1) else {
+            continue;
+        };
+        let following = cells[next].ch;
+        for key in keys {
+            if blocked.contains(key) {
+                continue;
+            }
+            let extends = if case_sensitive || key.is_uppercase() {
+                *key == following
+            } else {
+                following.to_lowercase().eq(key.to_lowercase())
+            };
+            if extends {
+                blocked.push(*key);
+            }
+        }
+    }
+    blocked
 }
 
 fn distance(buffer: &Buffer, left: usize, right: usize) -> (usize, usize) {
@@ -85,7 +139,7 @@ mod tests {
     fn labels_are_typed_once_and_nearest_first() {
         let buffer = Buffer::from_text("one two three", None);
         let matches = find_matches(&buffer, "o");
-        let hints = assign(&buffer, &matches, (0, 0), &keys());
+        let hints = assign(&buffer, &matches, (0, 0), &keys(), &[]);
         assert_eq!(
             hints
                 .iter()
@@ -104,7 +158,7 @@ mod tests {
         let buffer = Buffer::from_text(&text, None);
         let matches = find_matches(&buffer, "hit");
         assert_eq!(matches.len(), 9);
-        let hints = assign(&buffer, &matches, (0, 0), &keys());
+        let hints = assign(&buffer, &matches, (0, 0), &keys(), &[]);
         assert_eq!(hints.len(), MAX_HINTS);
         assert_eq!(
             hints.iter().map(|hint| hint.key).collect::<Vec<_>>(),
@@ -123,7 +177,7 @@ mod tests {
     fn the_bottom_of_the_screen_is_the_anchor() {
         let buffer = Buffer::from_text("near\nfar\nnear", None);
         let matches = find_matches(&buffer, "near");
-        let hints = assign(&buffer, &matches, (2, 0), &keys());
+        let hints = assign(&buffer, &matches, (2, 0), &keys(), &[]);
         assert_eq!(
             hints
                 .iter()
@@ -136,8 +190,35 @@ mod tests {
     #[test]
     fn no_hints_without_matches_or_keys() {
         let buffer = Buffer::from_text("text", None);
-        assert!(assign(&buffer, &[], (0, 0), &keys()).is_empty());
+        assert!(assign(&buffer, &[], (0, 0), &keys(), &[]).is_empty());
         let matches = find_matches(&buffer, "t");
-        assert!(assign(&buffer, &matches, (0, 0), &[]).is_empty());
+        assert!(assign(&buffer, &matches, (0, 0), &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn keys_that_would_extend_the_query_are_not_labels() {
+        let buffer = Buffer::from_text("add dad", None);
+        let matches = find_matches(&buffer, "a");
+        assert_eq!(blocked_keys(&buffer, &matches, &keys(), false), ['d']);
+        let hints = assign(&buffer, &matches, (0, 0), &keys(), &['d']);
+        assert_eq!(
+            hints.iter().map(|hint| hint.key).collect::<Vec<_>>(),
+            ['a', 's']
+        );
+    }
+
+    #[test]
+    fn smart_case_decides_which_key_can_extend_the_query() {
+        let buffer = Buffer::from_text("aA", None);
+        let matches = find_matches(&buffer, "a");
+        // Both cases extend the query: 'a' folds onto the 'A' in the text, and typing 'A' turns the
+        // query case-sensitive, which the text still matches.
+        assert_eq!(blocked_keys(&buffer, &matches, &['a'], false), ['a']);
+        assert_eq!(blocked_keys(&buffer, &matches, &['A'], false), ['A']);
+        // A case-sensitive query only ever counts the exact character.
+        assert_eq!(
+            blocked_keys(&buffer, &matches, &['a'], true),
+            Vec::<char>::new()
+        );
     }
 }

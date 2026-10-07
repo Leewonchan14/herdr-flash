@@ -379,11 +379,18 @@ impl App {
 
     fn refresh(&mut self) {
         self.matches = matcher::find_matches(&self.buffer, &self.query);
+        let blocked = hints::blocked_keys(
+            &self.buffer,
+            &self.matches,
+            &self.keys,
+            matcher::is_case_sensitive(&self.query),
+        );
         self.hints = hints::assign(
             &self.buffer,
             &self.matches,
             self.anchor_position(),
             &self.keys,
+            &blocked,
         );
         self.message = if self.query.is_empty() {
             String::new()
@@ -760,6 +767,25 @@ mod tests {
         assert_eq!(app.cursor_position(), (0, 4));
         app.handle_key(Key::Char('e'));
         assert_eq!(app.cursor_position(), (0, 6));
+    }
+
+    #[test]
+    fn typing_past_a_hint_key_extends_the_query_instead_of_jumping() {
+        let mut app = app("alpha-beta.gamma delta");
+        type_keys(&mut app, "delt");
+        assert_eq!(app.query(), "delt");
+        // 'a' is a configured hint key, but it continues the match, so it must extend the query
+        // instead of picking a hint (the cursor must not move).
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.phase(), Phase::Search);
+        assert_eq!(app.query(), "delta");
+        // the cursor must not move while the query is still being typed
+        assert_eq!(app.cursor_position(), (0, 0));
+        // the match ends at the line end, so nothing blocks the label and 'a' picks it
+        assert_eq!(app.hints().len(), 1);
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.phase(), Phase::Cursor);
+        assert_eq!(app.cursor_position(), (0, 17));
     }
 
     #[test]

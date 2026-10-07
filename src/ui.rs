@@ -123,17 +123,14 @@ pub fn status_line(app: &App, width: usize) -> (String, String) {
     };
     let base = match app.phase() {
         Phase::Search => {
+            let hints = hint_segment(app);
             if app.query().is_empty() {
-                format!(
-                    "flash · search · type a query · hints {} · esc cancel",
-                    hint_keys(app)
-                )
+                format!("flash · search · type a query{hints} · esc cancel")
             } else {
                 format!(
-                    "flash · search {:?} · {} matches · hints {} · enter jump · backspace widen · esc cancel",
+                    "flash · search {:?} · {} matches{hints} · enter jump · backspace widen · esc cancel",
                     app.query(),
                     app.matches().len(),
-                    hint_keys(app)
                 )
             }
         }
@@ -158,12 +155,21 @@ pub fn status_line(app: &App, width: usize) -> (String, String) {
     clamp(&base, width, &notice)
 }
 
-fn hint_keys(app: &App) -> String {
-    app.hint_keys()
+/// ` · hints a s d`, listing only the labels actually in play — empty when nothing can be picked
+/// (no matches, or every key would extend the query).
+fn hint_segment(app: &App) -> String {
+    if app.matches().is_empty() {
+        return String::new();
+    }
+    let keys: Vec<String> = app
+        .hints()
         .iter()
-        .map(|key| key.to_string())
-        .collect::<Vec<_>>()
-        .join(" ")
+        .map(|hint| hint.key.to_string())
+        .collect();
+    if keys.is_empty() {
+        return String::new();
+    }
+    format!(" · hints {}", keys.join(" "))
 }
 
 fn clamp(base: &str, width: usize, notice: &str) -> (String, String) {
@@ -265,8 +271,9 @@ mod tests {
         app.handle_key(Key::Char('글'));
         let rows = cells(&mut app, 20, 3);
         // The label replaces both cells of the wide 글; the rest of the row keeps its columns.
+        // ('a' follows the match in the text, so it stays typeable and the label is 's'.)
         assert_eq!(rows[0][0], "한");
-        assert_eq!(rows[0][2], "a");
+        assert_eq!(rows[0][2], "s");
         assert_eq!(rows[0][3], " ");
         assert_eq!(rows[0][4], "a");
         assert_eq!(rows[0][5], "b");
@@ -301,7 +308,7 @@ mod tests {
         let (status, notice) = status_line(&app, 120);
         assert!(status.contains("search \"f\""), "{status}");
         assert!(status.contains("3 matches"), "{status}");
-        assert!(status.contains("hints a s d g h"), "{status}");
+        assert!(status.contains("hints a s d"), "{status}");
         assert!(notice.is_empty());
     }
 
@@ -324,6 +331,17 @@ mod tests {
                 "width {width}: {status:?} {notice:?}"
             );
         }
+    }
+
+    #[test]
+    fn status_shows_only_the_labels_in_play() {
+        // The 'd' that follows every "a" can extend the query, so it is not a label; the status
+        // line lists just the two labels the two matches carry.
+        let mut app = app("add dad");
+        app.handle_key(Key::Char('a'));
+        let (status, _) = status_line(&app, 120);
+        assert!(status.contains("hints a s"), "{status}");
+        assert!(!status.contains("hints a s d"), "{status}");
     }
 
     #[test]
