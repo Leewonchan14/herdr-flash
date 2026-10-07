@@ -1,9 +1,8 @@
 //! Herdr Unix-socket JSON-RPC client.
 //!
-//! Only read paths, the copy toast and the copy-mode handoff are used: the picker never moves the
-//! source pane, never writes to its PTY, and never changes its scroll position. `pane.read` is the
-//! capture, `pane.layout` supplies the wrap width for the captured text, and — on a Herdr that
-//! implements it — `pane.copy_mode_jump` hands the picked cell to Herdr's own copy mode.
+//! Only read paths and the copy toast are used: the picker never moves the source pane, never
+//! writes to its PTY, and never changes its scroll position. `pane.read` is the capture, and
+//! `pane.layout` supplies the wrap width for the captured text.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -19,26 +18,6 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct VisiblePane {
     pub text: String,
     pub revision: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PaneScroll {
-    pub offset_from_bottom: u64,
-}
-
-/// A request to place Herdr's copy-mode cursor on a viewport cell.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CopyModeJump {
-    pub pane_id: String,
-    /// Row within the pane's visible viewport, which is the picker's own row index.
-    pub viewport_row: u32,
-    /// Display cell within that row, which is the picker's own column.
-    pub viewport_col: u16,
-    pub content_revision: Option<u64>,
-    pub offset_from_bottom: Option<u64>,
-    /// Visible text of the target row as captured, so Herdr accepts the jump while unrelated
-    /// output keeps churning.
-    pub expected_row: Option<String>,
 }
 
 #[derive(Debug)]
@@ -171,58 +150,6 @@ impl SocketClient {
         usize::try_from(width).context("pane width did not fit in usize")
     }
 
-    /// Current scroll offset, part of the viewport identity sent with a jump.
-    pub fn pane_scroll(&mut self, pane_id: &str) -> Result<PaneScroll> {
-        let result = self.call("pane.get", json!({ "pane_id": pane_id }))?;
-        let actual = result["type"].as_str().unwrap_or("<missing>");
-        if actual != "pane_info" {
-            bail!("expected a pane_info result, got {actual}");
-        }
-        let offset = result["pane"]["scroll"]["offset_from_bottom"]
-            .as_u64()
-            .context("pane_info result did not include the scroll offset")?;
-        Ok(PaneScroll {
-            offset_from_bottom: offset,
-        })
-    }
-
-    /// Ask Herdr to enter its copy mode with the cursor on a viewport cell of `pane_id`.
-    ///
-    /// The jump is sent while the popup is still open: Herdr defers it until the popup closes, so
-    /// a rejection still reaches the picker instead of failing after the popup is gone.
-    pub fn copy_mode_jump(&mut self, request: &CopyModeJump) -> Result<()> {
-        let mut params = json!({
-            "pane_id": request.pane_id,
-            "viewport_row": request.viewport_row,
-            "viewport_col": request.viewport_col,
-        });
-        if let Some(revision) = request.content_revision {
-            params["content_revision"] = json!(revision);
-        }
-        if let Some(offset) = request.offset_from_bottom {
-            params["offset_from_bottom"] = json!(offset);
-        }
-        if let Some(expected_row) = request.expected_row.as_deref() {
-            params["expected_row"] = json!(expected_row);
-        }
-        self.call("pane.copy_mode_jump", params)?;
-        Ok(())
-    }
-
-    /// True when the running server exposes `pane.copy_mode_jump`.
-    ///
-    /// Probes with an empty pane id: a server without the method answers `unknown variant`, while
-    /// a server with it answers `pane_not_found`.
-    pub fn supports_copy_mode_jump(&mut self) -> bool {
-        match self.call(
-            "pane.copy_mode_jump",
-            json!({ "pane_id": "", "viewport_row": 0, "viewport_col": 0 }),
-        ) {
-            Ok(_) => true,
-            Err(error) => !error.to_string().contains("unknown variant"),
-        }
-    }
-
     /// Show a Herdr toast. Failures are non-fatal for the caller.
     pub fn show_notification(&mut self, title: &str) -> Result<()> {
         self.call("notification.show", json!({ "title": title }))?;
@@ -337,52 +264,6 @@ mod tests {
         assert_eq!(client.focused_pane_id().unwrap(), "w2:p3");
         let request: Value = serde_json::from_str(&server.join().unwrap()).unwrap();
         assert_eq!(request["method"], "pane.current");
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn copy_mode_jump_sends_the_viewport_identity() {
-        let body = r#"{"id":"x","result":{"type":"ok"}}"#;
-        let (path, server) = one_shot_server(body);
-        let mut client = SocketClient::connect(&path).unwrap();
-        client
-            .copy_mode_jump(&CopyModeJump {
-                pane_id: "w1:p1".into(),
-                viewport_row: 12,
-                viewport_col: 5,
-                content_revision: Some(7),
-                offset_from_bottom: Some(3),
-                expected_row: Some("hello world".into()),
-            })
-            .unwrap();
-        let request: Value = serde_json::from_str(&server.join().unwrap()).unwrap();
-        assert_eq!(request["method"], "pane.copy_mode_jump");
-        assert_eq!(request["params"]["pane_id"], "w1:p1");
-        assert_eq!(request["params"]["viewport_row"], 12);
-        assert_eq!(request["params"]["viewport_col"], 5);
-        assert_eq!(request["params"]["content_revision"], 7);
-        assert_eq!(request["params"]["offset_from_bottom"], 3);
-        assert_eq!(request["params"]["expected_row"], "hello world");
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn a_server_without_the_method_is_not_supported() {
-        let body = r#"{"id":"x","error":{"code":"invalid_request","message":"invalid request: unknown variant `pane.copy_mode_jump`, expected one of `ping`"}}"#;
-        let (path, server) = one_shot_server(body);
-        let mut client = SocketClient::connect(&path).unwrap();
-        assert!(!client.supports_copy_mode_jump());
-        let _ = server.join();
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn a_server_with_the_method_is_supported_even_when_the_probe_pane_is_missing() {
-        let body = r#"{"id":"x","error":{"code":"pane_not_found","message":"pane  not found"}}"#;
-        let (path, server) = one_shot_server(body);
-        let mut client = SocketClient::connect(&path).unwrap();
-        assert!(client.supports_copy_mode_jump());
-        let _ = server.join();
         let _ = std::fs::remove_file(path);
     }
 }

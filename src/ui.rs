@@ -127,13 +127,8 @@ pub fn status_line(app: &App, width: usize) -> (String, String) {
             if app.query().is_empty() {
                 format!("flash · search · type a query{hints} · esc cancel")
             } else {
-                let pick = if app.handoff() {
-                    "hint/enter copy mode"
-                } else {
-                    "enter jump"
-                };
                 format!(
-                    "flash · search {:?} · {} matches{hints} · {pick} · backspace widen · esc cancel",
+                    "flash · search {:?} · {} matches{hints} · enter jump · backspace widen · esc cancel",
                     app.query(),
                     app.matches().len(),
                 )
@@ -315,21 +310,6 @@ mod tests {
         assert!(status.contains("3 matches"), "{status}");
         assert!(status.contains("hints a s d"), "{status}");
         assert!(notice.is_empty());
-    }
-
-    #[test]
-    fn status_names_the_handoff_when_it_is_on() {
-        let mut app = crate::app::App::new(
-            crate::buffer::Buffer::from_text("alpha beta", None),
-            vec!['a', 's'],
-            crate::theme::Theme::default(),
-        );
-        for ch in "al".chars() {
-            app.handle_key(crate::app::Key::Char(ch));
-        }
-        app.set_handoff(true);
-        let (status, _) = status_line(&app, 120);
-        assert!(status.contains("hint/enter copy mode"), "{status}");
     }
 
     #[test]

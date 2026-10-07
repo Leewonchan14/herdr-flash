@@ -8,8 +8,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use herdr_flash::app::{App, Key, Outcome};
 use herdr_flash::buffer::Buffer;
 use herdr_flash::config::{self, Settings};
-use herdr_flash::herdr_client::{CopyModeJump, PaneScroll, SocketClient};
-use herdr_flash::jump;
+use herdr_flash::herdr_client::SocketClient;
 use herdr_flash::{clipboard, ui};
 use serde_json::Value;
 
@@ -25,10 +24,6 @@ fn main() -> Result<()> {
                      \n\
                      Run through the Herdr plugin popup (prefix+shift+s):\n\
                      \x20 herdr plugin action invoke Leewonchan14.herdr-flash.open\n\
-                     \n\
-                     A pick hands the cell to Herdr's own copy mode when the running Herdr\n\
-                     \x20 implements pane.copy_mode_jump (docs/herdr-copy-mode-jump.patch);\n\
-                     \x20 every other build keeps the picker's own copy cursor instead.\n\
                      \n\
                      Environment: HERDR_SOCKET_PATH, HERDR_PLUGIN_CONTEXT_JSON,\n\
                      \x20            HERDR_PLUGIN_CONFIG_DIR, HERDR_PLUGIN_STATE_DIR"
@@ -55,27 +50,12 @@ fn run() -> Result<()> {
         })
         .ok();
     let settings = config::load(config_dir().as_deref())?;
-    // A Herdr that implements pane.copy_mode_jump takes the pick; every other build keeps the
-    // picker's own copy cursor, so the plugin still works against a stock Herdr.
-    let handoff = client.supports_copy_mode_jump();
-    let scroll = if handoff {
-        client
-            .pane_scroll(&pane_id)
-            .map_err(|error| {
-                log_state(&format!("pane_scroll_unavailable: {error:#}"));
-                error
-            })
-            .ok()
-    } else {
-        None
-    };
     let mut buffer = Buffer::from_text(&snapshot.text, wrap_width);
     let soft_wraps = merge_soft_wraps(&mut client, &pane_id, &mut buffer, wrap_width);
     log_state(&format!(
-        "start pane={pane_id} revision={} rows={} wrap_width={wrap_width:?} soft_wraps={soft_wraps} handoff={handoff} scroll={:?} hint_keys={}",
+        "start pane={pane_id} revision={} rows={} wrap_width={wrap_width:?} soft_wraps={soft_wraps} hint_keys={}",
         snapshot.revision,
         snapshot.text.lines().count(),
-        scroll.map(|scroll| scroll.offset_from_bottom),
         settings
             .hint_keys
             .iter()
@@ -85,17 +65,9 @@ fn run() -> Result<()> {
     ));
 
     let mut app = App::new(buffer, settings.hint_keys.clone(), settings.theme.clone());
-    app.set_handoff(handoff);
-    let target = handoff.then(|| JumpTarget {
-        pane_id: pane_id.clone(),
-        revision: snapshot.revision,
-        scroll,
-        wrap_width,
-    });
-    let outcome = run_picker(&mut app, &settings, &mut client, target.as_ref())?;
+    let outcome = run_picker(&mut app, &settings, &mut client)?;
     match &outcome {
         Outcome::Copy(text) => log_state(&format!("outcome=copy chars={}", text.chars().count())),
-        Outcome::Jump { row, col } => log_state(&format!("outcome=jump row={row} col={col}")),
         Outcome::Cancel => log_state("outcome=cancel"),
         Outcome::Continue => log_state("outcome=continue"),
     }
@@ -150,12 +122,7 @@ fn settle_clipboard_forward() {
     std::thread::sleep(Duration::from_millis(200));
 }
 
-fn run_picker(
-    app: &mut App,
-    settings: &Settings,
-    client: &mut SocketClient,
-    jump_target: Option<&JumpTarget>,
-) -> Result<Outcome> {
+fn run_picker(app: &mut App, settings: &Settings, client: &mut SocketClient) -> Result<Outcome> {
     let _guard = TerminalGuard;
     let mut terminal = ratatui::init();
     loop {
@@ -178,78 +145,8 @@ fn run_picker(
                 log_state(&format!("outcome=copy chars={}", text.chars().count()));
                 app.after_yank(&text);
             }
-            Outcome::Jump { row, col } => {
-                // The picker only hands off when the server supports it, so the target exists.
-                let Some(target) = jump_target else {
-                    log_state("jump=no_target");
-                    return Ok(Outcome::Cancel);
-                };
-                let row_index = usize::try_from(row).unwrap_or(usize::MAX);
-                let expected_row = app.buffer().row_text(row_index);
-                match deliver_jump(client, target, &expected_row, row, col) {
-                    Ok(()) => {
-                        log_state(&format!("jump=delivered row={row} col={col}"));
-                        return Ok(Outcome::Jump { row, col });
-                    }
-                    Err(error) => {
-                        log_state(&format!("jump=failed {error:#}"));
-                        app.show_error(format!("jump failed: {error}"));
-                    }
-                }
-            }
             other => return Ok(other),
         }
-    }
-}
-
-/// The pane identity a jump is validated against, captured when the picker opened.
-struct JumpTarget {
-    pane_id: String,
-    revision: u64,
-    scroll: Option<PaneScroll>,
-    wrap_width: Option<usize>,
-}
-
-/// Send the jump, retrying once when only unrelated rows changed.
-///
-/// Live panes keep printing: Herdr rejects a jump whose captured revision or scroll identity no
-/// longer matches. As long as the picked row still holds the same text, the cell is still the cell
-/// the user picked, so the jump is re-issued against the fresh identity. When the row itself
-/// changed the jump stays rejected and the error reaches the picker.
-fn deliver_jump(
-    client: &mut SocketClient,
-    target: &JumpTarget,
-    expected_row: &str,
-    row: u32,
-    col: u16,
-) -> Result<()> {
-    let request = |revision: u64, offset: Option<u64>| CopyModeJump {
-        pane_id: target.pane_id.clone(),
-        viewport_row: row,
-        viewport_col: col,
-        content_revision: Some(revision),
-        offset_from_bottom: offset,
-        expected_row: Some(expected_row.to_string()),
-    };
-    match client.copy_mode_jump(&request(
-        target.revision,
-        target.scroll.map(|scroll| scroll.offset_from_bottom),
-    )) {
-        Ok(()) => Ok(()),
-        Err(error) if jump::is_stale(&error) => {
-            let fresh = client.read_visible_pane(&target.pane_id)?;
-            if !jump::may_retry(expected_row, &fresh.text, row, target.wrap_width) {
-                log_state("jump=retry_skipped target_row_changed");
-                return Err(error);
-            }
-            log_state("jump=retry_fresh_viewport");
-            let fresh_scroll = client.pane_scroll(&target.pane_id).ok();
-            client.copy_mode_jump(&request(
-                fresh.revision,
-                fresh_scroll.map(|scroll| scroll.offset_from_bottom),
-            ))
-        }
-        Err(error) => Err(error),
     }
 }
 

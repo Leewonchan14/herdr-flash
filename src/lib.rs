@@ -4,10 +4,10 @@
 //! matches with at most five one-key hints, lands a cursor on the picked target, and yanks a vim
 //! selection through OSC 52.
 //!
-//! Herdr's own copy mode lives in the client. A Herdr that implements `pane.copy_mode_jump` (see
-//! `docs/herdr-copy-mode-jump.patch`) lets a pick hand the cell over to that copy mode; every other
-//! build — the request `RooseveltAdvisors/herdr-leap` calls does not exist upstream, see
-//! herdrdev/herdr#2249 — gets the same picker with its own copy cursor instead.
+//! Herdr's own copy mode lives in the client, and no released Herdr exposes an API that places its
+//! cursor (the request that `RooseveltAdvisors/herdr-leap` calls, `pane.copy_mode_jump`, does not
+//! exist — see herdrdev/herdr#2249). herdr-flash therefore brings the copy cursor into its own
+//! popup instead of pretending to move the client's.
 
 pub mod app;
 pub mod buffer;
@@ -15,7 +15,6 @@ pub mod clipboard;
 pub mod config;
 pub mod herdr_client;
 pub mod hints;
-pub mod jump;
 pub mod matcher;
 pub mod theme;
 pub mod ui;
