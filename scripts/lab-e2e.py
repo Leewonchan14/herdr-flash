@@ -165,11 +165,12 @@ def main():
         if not lab.wait_for_text(EXPECTED):
             failures.append("popup did not render the captured pane text")
 
-        # Query "ex", pick hint 'a', select the word end, yank.
+        # Query "ex". The 'a' that follows a match stays typeable, so the labels in play are 's'
+        # (the output hit nearest the prompt) and 'd' (the same text in the echoed command).
         lab.send("ex", settle=0.5)
-        if not lab.wait_for_text("hints a s d g h"):
+        if not lab.wait_for_text("hints s d"):
             failures.append("status line did not render the hint keys")
-        lab.send("a", settle=0.5)
+        lab.send("s", settle=0.5)
         lab.send("ve", settle=0.5)
         lab.send("y", settle=1.5)
 
