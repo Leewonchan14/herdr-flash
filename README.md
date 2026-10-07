@@ -67,7 +67,7 @@ Press `prefix+shift+s` on any pane. The picker takes over the screen with that p
 | search | `Enter` | jump to the nearest match |
 | search | `Esc` / `Ctrl-C` | cancel |
 | cursor | `h j k l` / arrows | move by cell |
-| cursor | `w b e` | word forward / back / end |
+| cursor | `w b e` / `W B E` | word / WORD forward / back / end |
 | cursor | `0 ^ $` | line start / first non-blank / line end |
 | cursor | `g g` / `G` | first line / last line |
 | cursor | `Ctrl-u` `Ctrl-d`, `PageUp` `PageDown` | half page / page |

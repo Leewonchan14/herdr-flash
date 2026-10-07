@@ -339,16 +339,14 @@ impl App {
                 self.move_to(self.buffer.row_tail(row).unwrap_or(self.cursor));
                 Outcome::Continue
             }
-            Key::Char('w') => {
-                self.move_to(self.word_forward_start());
-                Outcome::Continue
-            }
-            Key::Char('b') => {
-                self.move_to(self.word_backward_start());
-                Outcome::Continue
-            }
-            Key::Char('e') => {
-                self.move_to(self.word_forward_end());
+            Key::Char(ch @ ('w' | 'W' | 'b' | 'B' | 'e' | 'E')) => {
+                let big = ch.is_ascii_uppercase();
+                let target = match ch.to_ascii_lowercase() {
+                    'w' => self.word_forward_start(big),
+                    'b' => self.word_backward_start(big),
+                    _ => self.word_forward_end(big),
+                };
+                self.move_to(target);
                 Outcome::Continue
             }
             Key::Ctrl('u') => {
@@ -467,16 +465,20 @@ impl App {
             .map_or((row, 0), |index| self.buffer.position_of(index))
     }
 
-    fn word_forward_start(&self) -> usize {
+    fn word_forward_start(&self, big: bool) -> usize {
         let cells = self.buffer.cells();
         let mut index = self.cursor;
-        if class_of(cells[index].ch) != Class::Blank {
-            let class = class_of(cells[index].ch);
-            while index + 1 < cells.len() && class_of(cells[index + 1].ch) == class {
-                index += 1;
+        if class_of(cells[index].ch, big) != Class::Blank {
+            let class = class_of(cells[index].ch, big);
+            // A soft wrap keeps the word going; a hard line break ends it like whitespace does.
+            while let Some(next) = self.buffer.next_char(index) {
+                if class_of(cells[next].ch, big) != class {
+                    break;
+                }
+                index = next;
             }
         }
-        while index + 1 < cells.len() && class_of(cells[index + 1].ch) == Class::Blank {
+        while index + 1 < cells.len() && class_of(cells[index + 1].ch, big) == Class::Blank {
             index += 1;
         }
         if index + 1 < cells.len() {
@@ -486,42 +488,45 @@ impl App {
         }
     }
 
-    fn word_backward_start(&self) -> usize {
+    fn word_backward_start(&self, big: bool) -> usize {
         let cells = self.buffer.cells();
         let mut index = self.cursor;
         if index == 0 {
             return 0;
         }
         index -= 1;
-        while index > 0 && class_of(cells[index].ch) == Class::Blank {
+        while index > 0 && class_of(cells[index].ch, big) == Class::Blank {
             index -= 1;
         }
-        let class = class_of(cells[index].ch);
-        while index > 0 && class_of(cells[index - 1].ch) == class {
-            index -= 1;
-        }
-        while index > 0 && class_of(cells[index - 1].ch) == Class::Blank {
-            index -= 1;
+        let class = class_of(cells[index].ch, big);
+        while let Some(previous) = self.buffer.previous_char(index) {
+            if class_of(cells[previous].ch, big) != class {
+                break;
+            }
+            index = previous;
         }
         index
     }
 
-    fn word_forward_end(&self) -> usize {
+    fn word_forward_end(&self, big: bool) -> usize {
         let cells = self.buffer.cells();
         let mut index = self.cursor;
         if index + 1 >= cells.len() {
             return index;
         }
         index += 1;
-        while index < cells.len() && class_of(cells[index].ch) == Class::Blank {
+        while index < cells.len() && class_of(cells[index].ch, big) == Class::Blank {
             index += 1;
         }
         if index >= cells.len() {
             return cells.len().saturating_sub(1);
         }
-        let class = class_of(cells[index].ch);
-        while index + 1 < cells.len() && class_of(cells[index + 1].ch) == class {
-            index += 1;
+        let class = class_of(cells[index].ch, big);
+        while let Some(next) = self.buffer.next_char(index) {
+            if class_of(cells[next].ch, big) != class {
+                break;
+            }
+            index = next;
         }
         index
     }
@@ -534,13 +539,15 @@ enum Class {
     Punctuation,
 }
 
-fn class_of(ch: char) -> Class {
+/// `big` collapses the word classes the way vim's `W`, `B` and `E` do: a WORD is any run of
+/// non-blank characters, punctuation included.
+fn class_of(ch: char, big: bool) -> Class {
     if ch.is_whitespace() {
         Class::Blank
-    } else if ch.is_alphanumeric() || ch == '_' {
-        Class::Word
-    } else {
+    } else if !(big || ch.is_alphanumeric() || ch == '_') {
         Class::Punctuation
+    } else {
+        Class::Word
     }
 }
 
@@ -753,6 +760,74 @@ mod tests {
         assert_eq!(app.cursor_position(), (0, 4));
         app.handle_key(Key::Char('e'));
         assert_eq!(app.cursor_position(), (0, 6));
+    }
+
+    #[test]
+    fn big_word_motions_step_over_whitespace_delimited_words() {
+        let mut app = app("foo-bar.baz qux-quux quux");
+        type_keys(&mut app, "foo");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        // W treats the whole punctuation run as part of the WORD.
+        app.handle_key(Key::Char('W'));
+        assert_eq!(app.cursor_position(), (0, 12));
+        app.handle_key(Key::Char('W'));
+        assert_eq!(app.cursor_position(), (0, 21));
+        app.handle_key(Key::Char('B'));
+        assert_eq!(app.cursor_position(), (0, 12));
+        app.handle_key(Key::Char('B'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        // E lands on the last character of the WORD.
+        app.handle_key(Key::Char('E'));
+        assert_eq!(app.cursor_position(), (0, 10));
+    }
+
+    #[test]
+    fn big_word_motions_cross_lines() {
+        let mut app = app("alpha-beta\n  gamma");
+        type_keys(&mut app, "alpha");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        app.handle_key(Key::Char('E'));
+        assert_eq!(app.cursor_position(), (0, 9));
+        app.handle_key(Key::Char('W'));
+        assert_eq!(app.cursor_position(), (1, 2));
+    }
+
+    #[test]
+    fn backward_word_motions_never_land_on_blanks() {
+        // `b`/`B` from mid-word go to the start of that word, not one cell past it into the space.
+        let mut app = app("foo baz");
+        type_keys(&mut app, "z");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.cursor_position(), (0, 6));
+        app.handle_key(Key::Char('b'));
+        assert_eq!(app.cursor_position(), (0, 4));
+        app.handle_key(Key::Char('b'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        app.handle_key(Key::Char('W'));
+        assert_eq!(app.cursor_position(), (0, 4));
+        app.handle_key(Key::Char('l'));
+        app.handle_key(Key::Char('B'));
+        assert_eq!(app.cursor_position(), (0, 4));
+    }
+
+    #[test]
+    fn word_motions_treat_a_hard_line_break_as_a_separator() {
+        // A line break separates words like whitespace: a run must not continue into the row above,
+        // while `w`/`W` still cross to the next row's first word.
+        let mut app = app("alpha-beta.gamma delta\nnext");
+        type_keys(&mut app, "del");
+        app.handle_key(Key::Enter);
+        assert_eq!(app.cursor_position(), (0, 17));
+        app.handle_key(Key::Char('B'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        app.handle_key(Key::Char('E'));
+        assert_eq!(app.cursor_position(), (0, 15));
+        app.handle_key(Key::Char('w'));
+        assert_eq!(app.cursor_position(), (0, 17));
+        app.handle_key(Key::Char('W'));
+        assert_eq!(app.cursor_position(), (1, 0));
     }
 
     #[test]
