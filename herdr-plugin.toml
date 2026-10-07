@@ -1,6 +1,6 @@
 id = "Leewonchan14.herdr-flash"
 name = "herdr-flash"
-version = "0.1.4"
+version = "0.1.5"
 min_herdr_version = "0.9.0"
 description = "flash.nvim-style labeled jump, cursor and yank for Herdr pane copy (prefix+shift+s)"
 platforms = ["linux", "macos"]
