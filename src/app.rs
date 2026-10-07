@@ -20,6 +20,8 @@ pub enum Outcome {
     Continue,
     /// Copy this text to the clipboard and exit.
     Copy(String),
+    /// Hand this viewport cell to Herdr's own copy mode and exit.
+    Jump { row: u32, col: u16 },
     /// Abort without copying.
     Cancel,
 }
@@ -58,6 +60,7 @@ pub struct App {
     pending_g: bool,
     viewport_rows: usize,
     view_offset: usize,
+    handoff: bool,
 }
 
 impl App {
@@ -77,6 +80,7 @@ impl App {
             pending_g: false,
             viewport_rows: 24,
             view_offset: 0,
+            handoff: false,
         };
         // A capture that ends with a blank row has that row's head one past the last cell; keep the
         // cursor on a real cell so the motions that index `cells[cursor]` stay in bounds.
@@ -99,6 +103,21 @@ impl App {
 
     pub fn hint_keys(&self) -> &[char] {
         &self.keys
+    }
+
+    /// Hand every pick to Herdr's own copy mode (`pane.copy_mode_jump`) instead of moving the
+    /// picker's own cursor. Set by the entry point once the server is known to support it.
+    pub fn set_handoff(&mut self, handoff: bool) {
+        self.handoff = handoff;
+    }
+
+    pub fn handoff(&self) -> bool {
+        self.handoff
+    }
+
+    /// Report a problem without leaving the picker.
+    pub fn show_error(&mut self, text: String) {
+        self.message = text;
     }
 
     /// Reset after a yank when the picker stays open.
@@ -215,10 +234,7 @@ impl App {
                 Outcome::Continue
             }
             Key::Enter => match self.nearest_match() {
-                Some(start) => {
-                    self.jump(start);
-                    Outcome::Continue
-                }
+                Some(start) => self.pick(start),
                 None => {
                     self.message = "no match".to_string();
                     Outcome::Continue
@@ -226,8 +242,7 @@ impl App {
             },
             Key::Char(ch) => {
                 if let Some(hint) = self.hints.iter().find(|hint| hint.key == ch) {
-                    self.jump(hint.span.start);
-                    return Outcome::Continue;
+                    return self.pick(hint.span.start);
                 }
                 if ch.is_control() {
                     return Outcome::Continue;
@@ -453,6 +468,20 @@ impl App {
         self.message = String::new();
     }
 
+    /// A pick: hand the cell to Herdr's copy mode when the handoff is available, else move the
+    /// picker's own cursor onto it.
+    fn pick(&mut self, cell_index: usize) -> Outcome {
+        if !self.handoff {
+            self.jump(cell_index);
+            return Outcome::Continue;
+        }
+        let (row, col) = self.buffer.position_of(cell_index);
+        Outcome::Jump {
+            row: u32::try_from(row).unwrap_or(u32::MAX),
+            col,
+        }
+    }
+
     fn yank_text(&self) -> String {
         match self.selection_range() {
             Some((start, end)) => self.buffer.extract_indices(start, end),
@@ -654,6 +683,41 @@ mod tests {
         app.handle_key(Key::Enter);
         assert_eq!(app.phase(), Phase::Cursor);
         assert_eq!(app.cursor_position(), (1, 2));
+    }
+
+    #[test]
+    fn a_hint_hands_the_cell_to_herdrs_copy_mode_when_the_handoff_is_on() {
+        let mut app = app("alpha beta gamma");
+        app.set_handoff(true);
+        type_keys(&mut app, "a");
+        // The hints label the matches nearest first: 'd' is the 'a' in "beta".
+        assert_eq!(
+            app.handle_key(Key::Char('d')),
+            Outcome::Jump { row: 0, col: 9 }
+        );
+        // The picker stays in search: the popup is about to close, not to take over.
+        assert_eq!(app.phase(), Phase::Search);
+    }
+
+    #[test]
+    fn enter_hands_the_nearest_match_to_herdrs_copy_mode_when_the_handoff_is_on() {
+        let mut app = app("one\ntwo");
+        app.set_handoff(true);
+        type_keys(&mut app, "o");
+        assert_eq!(app.handle_key(Key::Enter), Outcome::Jump { row: 1, col: 2 });
+    }
+
+    #[test]
+    fn a_wrapped_pick_reports_the_viewport_cell() {
+        let mut app = App::new(
+            Buffer::from_text("alpha beta gamma", Some(5)),
+            sanitize_keys(DEFAULT_HINT_KEYS),
+            Theme::default(),
+        );
+        app.set_handoff(true);
+        type_keys(&mut app, "beta");
+        // The wrap puts " beta" on the second visual row, so the 'b' is row 1, column 1.
+        assert_eq!(app.handle_key(Key::Enter), Outcome::Jump { row: 1, col: 1 });
     }
 
     #[test]
