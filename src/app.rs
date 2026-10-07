@@ -78,7 +78,14 @@ impl App {
             viewport_rows: 24,
             view_offset: 0,
         };
-        app.cursor = app.buffer.row_head(app.buffer.last_row()).unwrap_or(0);
+        // A capture that ends with a blank row has that row's head one past the last cell; keep the
+        // cursor on a real cell so the motions that index `cells[cursor]` stay in bounds.
+        let last_cell = app.buffer.cells().len().saturating_sub(1);
+        app.cursor = app
+            .buffer
+            .row_head(app.buffer.last_row())
+            .unwrap_or(0)
+            .min(last_cell);
         app
     }
 
@@ -250,7 +257,7 @@ impl App {
                 self.phase = Phase::Search;
                 self.anchor = None;
                 self.linewise = false;
-                self.message = "search".to_string();
+                self.refresh();
                 Outcome::Continue
             }
             Key::Enter | Key::Char('y') => {
@@ -265,7 +272,7 @@ impl App {
                     self.anchor = None;
                     self.phase = Phase::Cursor;
                 } else {
-                    self.anchor = Some(self.cursor);
+                    self.anchor.get_or_insert(self.cursor);
                     self.linewise = false;
                     self.phase = Phase::Select;
                 }
@@ -276,7 +283,7 @@ impl App {
                     self.anchor = None;
                     self.phase = Phase::Cursor;
                 } else {
-                    self.anchor = Some(self.cursor);
+                    self.anchor.get_or_insert(self.cursor);
                     self.linewise = true;
                     self.phase = Phase::Select;
                 }
@@ -411,8 +418,21 @@ impl App {
 
     fn move_vertical(&mut self, delta: isize) {
         let (row, col) = self.cursor_position();
+        let step = delta.signum();
+        if step == 0 {
+            return;
+        }
         let last = self.buffer.last_row() as isize;
-        let target = (row as isize + delta).clamp(0, last) as usize;
+        let requested = (row as isize + delta).clamp(0, last) as usize;
+        // Blank rows carry no cells, so the cursor cannot land on one: keep going in the direction
+        // of travel and fall back the other way, which is what lets a page motion clamped into a
+        // blank tail still reach the last row with text.
+        let Some(target) = self
+            .nearest_row_with_cells(requested, step)
+            .or_else(|| self.nearest_row_with_cells(requested, -step))
+        else {
+            return;
+        };
         let max_col = self.buffer.row_cells(target).saturating_sub(1);
         let col = col.min(max_col);
         let landing = self
@@ -422,6 +442,19 @@ impl App {
         if let Some(landing) = landing {
             self.move_to(landing);
         }
+    }
+
+    /// First row with cells reached from `start` walking by `step`.
+    fn nearest_row_with_cells(&self, start: usize, step: isize) -> Option<usize> {
+        let last = self.buffer.last_row() as isize;
+        let mut index = start as isize;
+        while (0..=last).contains(&index) {
+            if self.buffer.row_cells(index as usize) > 0 {
+                return Some(index as usize);
+            }
+            index += step;
+        }
+        None
     }
 
     /// Anchor for ranking hints: the bottom of the visible screen, which is where the prompt and
@@ -750,5 +783,58 @@ mod tests {
         app.handle_key(Key::Char('a'));
         assert_eq!(app.cursor_position().0, 39);
         assert_eq!(app.view_offset(), 30);
+    }
+
+    #[test]
+    fn vertical_motion_crosses_blank_rows() {
+        // Blank screen rows arrive as empty capture lines, and the cursor cannot sit on a row
+        // without cells, so j/k must keep going to the nearest row that has some.
+        let mut app = app("abc\n\nxyz");
+        type_keys(&mut app, "abc");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        app.handle_key(Key::Char('j'));
+        assert_eq!(app.cursor_position(), (2, 0));
+        app.handle_key(Key::Char('k'));
+        assert_eq!(app.cursor_position(), (0, 0));
+    }
+
+    #[test]
+    fn page_motion_reaches_the_last_row_with_text() {
+        let mut app = app("row0\nrow1\n\n\n");
+        type_keys(&mut app, "row0");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.cursor_position(), (0, 0));
+        app.handle_key(Key::PageDown);
+        assert_eq!(app.cursor_position(), (1, 0));
+    }
+
+    #[test]
+    fn backspace_from_cursor_restores_the_hint_labels() {
+        let mut app = app("alpha beta");
+        type_keys(&mut app, "al");
+        app.handle_key(Key::Char('a'));
+        assert_eq!(app.phase(), Phase::Cursor);
+        app.handle_key(Key::Backspace);
+        assert_eq!(app.phase(), Phase::Search);
+        assert_eq!(app.query(), "al");
+        assert_eq!(app.hints().len(), 1);
+        assert_eq!(app.hints()[0].key, 'a');
+    }
+
+    #[test]
+    fn switching_between_v_and_v_keeps_the_anchor() {
+        // vim switches mode without dropping the visual anchor: `V` after `v` (and `v` after
+        // `V`) must keep the selection, not collapse it to the cursor.
+        let mut app = app("abcd\nefgh");
+        type_keys(&mut app, "abcd");
+        app.handle_key(Key::Char('a'));
+        app.handle_key(Key::Char('v'));
+        app.handle_key(Key::Char('j'));
+        assert_eq!(app.selection_range(), Some((0, 4)));
+        app.handle_key(Key::Char('V'));
+        assert_eq!(app.selection_range(), Some((0, 7)));
+        app.handle_key(Key::Char('v'));
+        assert_eq!(app.selection_range(), Some((0, 4)));
     }
 }
