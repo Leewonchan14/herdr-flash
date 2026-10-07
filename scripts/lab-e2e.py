@@ -38,6 +38,7 @@ FIXTURE = "alpha beta gamma\nURL https://example.com/path/to/file\nEND\n"
 
 class Lab:
     def __init__(self):
+        self.binary = os.environ.get("HERDR_BIN", "herdr")
         self.master, slave = pty.openpty()
         import fcntl
         import struct
@@ -48,7 +49,7 @@ class Lab:
         env["TERM"] = "xterm-256color"
         env.pop("HERDR_SOCKET_PATH", None)
         self.proc = subprocess.Popen(
-            ["herdr", "--session", SESSION],
+            [self.binary, "--session", SESSION],
             stdin=slave,
             stdout=slave,
             stderr=slave,
@@ -93,7 +94,7 @@ class Lab:
         env = dict(os.environ)
         env["HERDR_SESSION"] = SESSION
         return subprocess.run(
-            ["herdr", "--session", SESSION, *args],
+            [self.binary, "--session", SESSION, *args],
             capture_output=True,
             text=True,
             env=env,
