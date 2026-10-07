@@ -142,6 +142,7 @@ fn run_picker(app: &mut App, settings: &Settings, client: &mut SocketClient) -> 
             Outcome::Copy(text) if !settings.exit_on_yank => {
                 clipboard::copy_to_clipboard(&text)?;
                 notify_copy(client, settings, &text);
+                log_state(&format!("outcome=copy chars={}", text.chars().count()));
                 app.after_yank(&text);
             }
             other => return Ok(other),

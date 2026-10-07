@@ -81,9 +81,9 @@ matches, `v`/`V` selections, and `y` to copy the selection or the match under th
 | cursor / select | `/` `?` / `Backspace` | back to the search, query intact |
 | cursor / select | `Esc` | clear the selection, or leave |
 
-The yank closes the picker (set `exit_on_yank = false` to keep it open for several grabs). Copying
-uses OSC 52, so it works locally and over SSH; Herdr forwards it (or converts it to the native
-clipboard).
+A yank stays in copy mode, so `n` / `y` can copy several matches in a row; set
+`exit_on_yank = true` to close the picker after a single copy. Copying uses OSC 52, so it works
+locally and over SSH; Herdr forwards it (or converts it to the native clipboard).
 
 ## Hints: at most five
 
@@ -104,7 +104,7 @@ clipboard).
 
 ```toml
 hint_keys = "asdgh"      # at most five keys are used
-exit_on_yank = true      # close the picker after a yank
+exit_on_yank = false     # stay in copy mode after a yank (set true to close)
 copy_toast = true        # show a Herdr toast with the copied preview
 
 [style]                  # named colors, #rrggbb, or 0..255
