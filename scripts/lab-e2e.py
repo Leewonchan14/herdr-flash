@@ -178,12 +178,25 @@ def main():
         text = lab.output.decode("utf-8", "replace")
         encoded = base64.b64encode(EXPECTED.encode()).decode()
         forwarded = f"\x1b]52;c;{encoded}\x07" in text
-        # Local sessions prefer the native clipboard; SSH sessions get the forwarded sequence.
+        # Local sessions apply the sequence to the native clipboard; SSH sessions get the forwarded
+        # sequence. The clipboard is shared with whoever is using the machine, so a concurrent copy
+        # can clobber the yank between the write and this read: redo the yank once before failing.
         clipboard = subprocess.run(["pbpaste"], capture_output=True, text=True).stdout
         if not forwarded and clipboard != EXPECTED:
-            failures.append(
-                f"yank did not land: osc52={forwarded} clipboard={clipboard!r}"
-            )
+            print(f"note: yank did not land on the first try (clipboard={clipboard!r}); retrying")
+            subprocess.run(["pbcopy"], input="herdr-flash-e2e-sentinel", text=True)
+            lab.send("\x01S", settle=1.0)
+            lab.send("ex", settle=0.5)
+            lab.send("s", settle=0.5)
+            lab.send("ve", settle=0.5)
+            lab.send("y", settle=1.5)
+            text = lab.output.decode("utf-8", "replace")
+            forwarded = f"\x1b]52;c;{encoded}\x07" in text
+            clipboard = subprocess.run(["pbpaste"], capture_output=True, text=True).stdout
+            if not forwarded and clipboard != EXPECTED:
+                failures.append(
+                    f"yank did not land: osc52={forwarded} clipboard={clipboard!r}"
+                )
 
         log_after = state_log_text()
         new_lines = log_after[len(log_before):] if log_after.startswith(log_before) else log_after
