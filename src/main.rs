@@ -1,6 +1,7 @@
 //! Entry point: capture the focused pane, run the flash picker, yank through OSC 52.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -49,8 +50,10 @@ fn run() -> Result<()> {
         })
         .ok();
     let settings = config::load(config_dir().as_deref())?;
+    let mut buffer = Buffer::from_text(&snapshot.text, wrap_width);
+    let soft_wraps = merge_soft_wraps(&mut client, &pane_id, &mut buffer, wrap_width);
     log_state(&format!(
-        "start pane={pane_id} revision={} rows={} wrap_width={wrap_width:?} hint_keys={}",
+        "start pane={pane_id} revision={} rows={} wrap_width={wrap_width:?} soft_wraps={soft_wraps} hint_keys={}",
         snapshot.revision,
         snapshot.text.lines().count(),
         settings
@@ -61,9 +64,8 @@ fn run() -> Result<()> {
             .join("")
     ));
 
-    let buffer = Buffer::from_text(&snapshot.text, wrap_width);
     let mut app = App::new(buffer, settings.hint_keys.clone(), settings.theme.clone());
-    let outcome = run_picker(&mut app, &settings)?;
+    let outcome = run_picker(&mut app, &settings, &mut client)?;
     match &outcome {
         Outcome::Copy(text) => log_state(&format!("outcome=copy chars={}", text.chars().count())),
         Outcome::Cancel => log_state("outcome=cancel"),
@@ -72,18 +74,55 @@ fn run() -> Result<()> {
     if let Outcome::Copy(text) = outcome {
         if !text.is_empty() {
             clipboard::copy_to_clipboard(&text)?;
-            if settings.copy_toast {
-                match client.show_notification(&toast_title(&text)) {
-                    Ok(()) => {}
-                    Err(error) => log_state(&format!("notification_error: {error:#}")),
-                }
-            }
+            notify_copy(&mut client, &settings, &text);
+            settle_clipboard_forward();
         }
     }
     Ok(())
 }
 
-fn run_picker(app: &mut App, settings: &Settings) -> Result<Outcome> {
+/// Recover the soft-wrap boundaries the wrapped `visible` capture cannot express, by re-wrapping
+/// the pane's unwrapped read and confirming logical lines from the bottom up. A failed read is
+/// non-fatal: the capture keeps its hard-line grid.
+fn merge_soft_wraps(
+    client: &mut SocketClient,
+    pane_id: &str,
+    buffer: &mut Buffer,
+    wrap_width: Option<usize>,
+) -> usize {
+    let Some(width) = wrap_width else {
+        return 0;
+    };
+    match client.read_unwrapped_pane(pane_id) {
+        Ok(unwrapped) => {
+            let reference = Buffer::from_text(&unwrapped.text, Some(width));
+            buffer.merge_soft_wraps(&reference)
+        }
+        Err(error) => {
+            log_state(&format!("unwrapped_read_failed: {error:#}"));
+            0
+        }
+    }
+}
+
+/// Show the copy toast unless the user disabled it. A failed toast never fails the yank.
+fn notify_copy(client: &mut SocketClient, settings: &Settings, text: &str) {
+    if !settings.copy_toast {
+        return;
+    }
+    if let Err(error) = client.show_notification(&toast_title(text)) {
+        log_state(&format!("notification_error: {error:#}"));
+    }
+}
+
+/// Herdr reads the pane's output and forwards the OSC 52 sequence to the client; give that forward
+/// a moment before the popup's process goes away, or the yank can race the pane closing over SSH.
+/// The sibling scrollback pickers wait 200 ms for the same reason.
+fn settle_clipboard_forward() {
+    std::thread::sleep(Duration::from_millis(200));
+}
+
+fn run_picker(app: &mut App, settings: &Settings, client: &mut SocketClient) -> Result<Outcome> {
     let _guard = TerminalGuard;
     let mut terminal = ratatui::init();
     loop {
@@ -102,6 +141,7 @@ fn run_picker(app: &mut App, settings: &Settings) -> Result<Outcome> {
             Outcome::Continue => {}
             Outcome::Copy(text) if !settings.exit_on_yank => {
                 clipboard::copy_to_clipboard(&text)?;
+                notify_copy(client, settings, &text);
                 app.after_yank(&text);
             }
             other => return Ok(other),

@@ -10,6 +10,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthChar;
 
 use crate::app::{App, Phase};
 use crate::theme::Theme;
@@ -169,25 +170,39 @@ fn clamp(base: &str, width: usize, notice: &str) -> (String, String) {
     if width == 0 {
         return (String::new(), String::new());
     }
-    let notice_width = notice.chars().count();
+    let notice_width = display_width(notice);
     if notice_width >= width {
         return (truncate(notice, width), String::new());
     }
     let base_budget = width - notice_width;
     let base = truncate(base, base_budget);
-    let notice = if base.chars().count() + notice_width <= width {
+    let notice = if display_width(&base) + notice_width <= width {
         notice.to_string()
     } else {
-        truncate(notice, width.saturating_sub(base.chars().count()))
+        truncate(notice, width.saturating_sub(display_width(&base)))
     };
     (base, notice)
 }
 
+/// Cell width of `text`, so wide characters do not push the status line past the pane edge.
+fn display_width(text: &str) -> usize {
+    text.chars()
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
+}
+
 fn truncate(text: &str, width: usize) -> String {
-    if text.chars().count() <= width {
-        return text.to_string();
+    let mut kept = String::new();
+    let mut cells = 0;
+    for ch in text.chars() {
+        let advance = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cells + advance > width {
+            break;
+        }
+        cells += advance;
+        kept.push(ch);
     }
-    text.chars().take(width).collect()
+    kept
 }
 
 #[cfg(test)]
@@ -308,6 +323,17 @@ mod tests {
                 status.chars().count() + notice.chars().count() <= width.max(1),
                 "width {width}: {status:?} {notice:?}"
             );
+        }
+    }
+
+    #[test]
+    fn status_clamps_wide_characters_by_display_width() {
+        let mut app = app("한글 한글 한글");
+        app.handle_key(Key::Char('한'));
+        for width in [16, 24, 40] {
+            let (status, notice) = status_line(&app, width);
+            let cells = display_width(&status) + display_width(&notice);
+            assert!(cells <= width, "width {width}: {status:?} {notice:?}");
         }
     }
 

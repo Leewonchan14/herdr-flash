@@ -27,7 +27,9 @@ own cursor on the picked target, and yanks a vim selection through OSC 52.
   `herdr plugin pane open --placement popup --width 100% --height 100%` → entrypoint `flash`.
 - `src/buffer.rs` — the cell-accurate capture model: re-wraps logical lines at the pane width,
   tracks soft wraps (`Row::starts_line`), maps cells ⇄ `(row, col)`, and extracts text (soft-wrapped
-  rows join without a newline). The load-bearing module; keep it covered by unit tests.
+  rows join without a newline). `visible` returns hard screen rows, so `merge_soft_wraps` recovers
+  the real wraps by confirming whole logical lines against the pane's unwrapped read, bottom up. The
+  load-bearing module; keep it covered by unit tests.
 - `src/matcher.rs` — literal smart-case matching per logical line.
 - `src/hints.rs` — hint keys (sanitized to five) and nearest-first label assignment.
 - `src/app.rs` — the pure state machine (`Search` → `Cursor`/`Select` → `Copy`/`Cancel`), motions
@@ -36,8 +38,8 @@ own cursor on the picked target, and yanks a vim selection through OSC 52.
   cursor, selection, and the width-clamped status line.
 - `src/config.rs` / `src/theme.rs` — `$HERDR_PLUGIN_CONFIG_DIR/config.toml`, colors as named values,
   `#rrggbb`, or `0..255`.
-- `src/herdr_client.rs` — Unix-socket JSON-RPC (`pane.read`, `pane.layout`, `pane.current`,
-  `notification.show`), covered with `UnixListener` fixtures.
+- `src/herdr_client.rs` — Unix-socket JSON-RPC (`pane.read` `visible` + `recent_unwrapped`,
+  `pane.layout`, `pane.current`, `notification.show`), covered with `UnixListener` fixtures.
 - `src/main.rs` — thin entry point: resolve the pane from `HERDR_PLUGIN_CONTEXT_JSON`, capture, run
   the picker, emit OSC 52, log state to `$HERDR_PLUGIN_STATE_DIR/herdr-flash.log`.
 - `scripts/lab-e2e.py` — the isolated end-to-end proof. Named non-default session only.
@@ -73,6 +75,8 @@ python3 scripts/lab-e2e.py
 ## Notes
 
 - Do not commit `target/`, logs, or local editor files.
+- Keep the settle delay after the OSC 52 write: Herdr forwards the sequence asynchronously, so an
+  exit that races the forward can drop the yank over SSH.
 - A yank's success is only provable end-to-end: assert the clipboard (local) or the forwarded
   OSC 52 (SSH) after a real popup run, not just the unit-level `Outcome::Copy`.
 - Update this file only for durable repository-wide guidance.
