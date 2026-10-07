@@ -1,8 +1,9 @@
 # herdr-flash
 
 `prefix+shift+s` → **flash.nvim-style jump and yank for the focused Herdr pane**: type a query, every
-match lights up, at most **five one-key hints** appear on the nearest hits, one key lands the
-cursor, vim motions extend a selection, `y` copies it through OSC 52.
+match lights up, at most **five one-key hints** appear on the nearest hits, and one key lands on the
+target — in **Herdr's own copy mode** when the running Herdr implements `pane.copy_mode_jump`, and in
+the picker's own copy cursor on every other build (vim motions, selections, `y` through OSC 52).
 
 A [Herdr](https://herdr.dev) plugin. MIT.
 
@@ -24,9 +25,12 @@ lives in the **client**, and the public API only exposes *read-only* copy helper
 the pane's PTY, so it can never reach the client's copy mode either. There is no supported way for
 a plugin to move Herdr's copy cursor today.
 
-herdr-flash therefore stops pretending: it brings the copy cursor **into its own full-size popup**,
-which captures the pane's visible text, labels matches, and yanks for real. You get the workflow you
-wanted (jump to what you see, take it) without depending on an API that does not exist.
+herdr-flash stops pretending in both directions. It ships the missing Herdr change
+([`docs/herdr-copy-mode-jump.patch`](docs/herdr-copy-mode-jump.patch)) and uses
+`pane.copy_mode_jump` whenever the running Herdr implements it: a pick closes the popup and Herdr's
+own copy mode lands on the cell, so motions, search, selections and the yank are Herdr's. On any
+other build — stock 0.9.x, where that method does not exist — the same picker keeps its own copy
+cursor instead, so the workflow (jump to what you see, take it) still works everywhere.
 
 ## Install
 
@@ -59,8 +63,11 @@ description = "Flash (jump & yank)"
 ## Usage
 
 Press `prefix+shift+s` on any pane. The picker takes over the screen with that pane's visible text.
-Picking a hint drops you into the picker's **copy mode** at that cell: motions, `n`/`N` between
-matches, `v`/`V` selections, and `y` to copy the selection or the match under the cursor.
+
+Picking a hint hands the cell to **Herdr's own copy mode** when the running Herdr implements
+`pane.copy_mode_jump`: the popup closes and Herdr's copy cursor lands there, with Herdr's motions,
+`/` search, selections and `y` — and the `copy_mode_key` binding lets you press `shift+s` inside copy
+mode to flash again. On any other build the picker keeps its own copy cursor instead:
 
 | Phase | Key | Action |
 |---|---|---|
@@ -81,11 +88,10 @@ matches, `v`/`V` selections, and `y` to copy the selection or the match under th
 | cursor / select | `/` `?` / `Backspace` | back to the search, query intact |
 | cursor / select | `Esc` | clear the selection, or leave |
 
-A yank closes the picker and leaves you back in your pane: Herdr's own copy mode (`prefix+[`) cannot
-be entered from a plugin — no released API places its cursor — so the picker gets out of the way
-instead of staying on screen. Set `exit_on_yank = false` to stay in the picker's copy mode instead
-(handy for grabbing several matches in a row). Copying uses OSC 52, so it works locally and over
-SSH; Herdr forwards it (or converts it to the native clipboard).
+A yank in the picker's own copy mode closes the picker and leaves you back in your pane. Set
+`exit_on_yank = false` to stay in the picker's copy mode instead (handy for grabbing several matches
+in a row). Copying uses OSC 52, so it works locally and over SSH; Herdr forwards it (or converts it
+to the native clipboard).
 
 ## Hints: at most five
 
@@ -106,7 +112,7 @@ SSH; Herdr forwards it (or converts it to the native clipboard).
 
 ```toml
 hint_keys = "asdgh"      # at most five keys are used
-exit_on_yank = true      # close the picker after a yank (false keeps copy mode)
+exit_on_yank = true      # picker's own copy mode only: close after a yank (false keeps it)
 copy_toast = true        # show a Herdr toast with the copied preview
 
 [style]                  # named colors, #rrggbb, or 0..255
@@ -131,18 +137,21 @@ status_fg = "gray"
    is only joined when the unwrapped read confirms it, bottom up. The capture is frozen at open
    time, so you always land on what you saw.
 3. Typing re-runs the matcher over the captured text and re-labels the five nearest hits.
-4. A hint key (or `Enter`) lands the picker's cursor on the match; motions and selections run on the
+4. A hint key (or `Enter`) hands the cell to Herdr's copy mode when the server implements
+   `pane.copy_mode_jump` — the popup closes and the client applies the jump on the next frame — and
+   otherwise lands the picker's cursor on the match, where motions and selections run on the
    captured grid.
-5. `y` writes the selected text as an OSC 52 sequence and exits. Soft-wrapped rows are joined
-   without a newline, so a wrapped URL or path yanks as one line.
+5. `y` (in the picker's own copy mode) writes the selected text as an OSC 52 sequence and exits.
+   Soft-wrapped rows are joined without a newline, so a wrapped URL or path yanks as one line.
 
 The plugin never writes to the source pane: no PTY input, no scroll changes, no clipboard mutation
 unless you press `y`.
 
 ## Limitations
 
-- **The cursor is the popup's, not Herdr's copy-mode cursor** — see "Why this exists". Nothing in
-  the 0.9.x API can move the latter.
+- **Herdr's copy mode needs a patched Herdr.** Stock 0.9.x has no cursor-placement API, so the
+  handoff is off there and the picker uses its own copy cursor instead (see "Why this exists" and
+  `docs/herdr-copy-mode-jump.patch`).
 - Capture is the visible viewport only; scrollback is out of scope (use Herdr's copy mode or a
   scrollback picker for that).
 - Soft wraps are joined only where the unwrapped read confirms them, so a pane scrolled away from
@@ -172,24 +181,47 @@ cargo build --release --locked
 cargo clippy --all-targets -- -D warnings
 ```
 
-End-to-end proof in an isolated named session (never the default session):
+End-to-end proofs in isolated named sessions (never the default session):
 
 ```bash
-python3 scripts/lab-e2e.py
+HERDR_BIN=herdr python3 scripts/lab-e2e.py            # stock Herdr: the picker's own copy cursor
+HERDR_BIN=herdr python3 scripts/lab-e2e-handoff.py    # patched Herdr: the handoff + copy-mode key
 ```
 
-It starts `herdr --session herdr-flash-lab`, types a fixture into a pane, drives
-`prefix+shift+s` → query → hint → `v` → `e` → `y`, then asserts that the yank landed (native clipboard
-locally, OSC 52 over SSH) and that the plugin's state log recorded `outcome=copy`.
+Both start `herdr --session herdr-flash-lab`, type a fixture into a pane, drive
+`prefix+shift+s` → query → hint → `v` → `e` → `y`, and assert the yank landed (native clipboard
+locally, OSC 52 over SSH) plus the plugin's state log (`outcome=copy` / `jump=delivered`). The
+handoff script also proves the fallback: case C runs a stock Herdr as `HERDR_STABLE_BIN` and asserts
+the pick stays in the picker's own copy mode.
+
+### The Herdr patch
+
+`docs/herdr-copy-mode-jump.patch` applies to Herdr 0.9.3 and adds `pane.copy_mode_jump`, the
+server→client push behind it, and the `copy_mode_key` binding that lets a plugin action run inside
+copy mode:
+
+```bash
+git clone https://github.com/herdrdev/herdr && cd herdr
+git checkout v0.9.3
+git apply /path/to/herdr-flash/docs/herdr-copy-mode-jump.patch
+cargo build --release --locked        # needs Zig 0.16 for the vendored libghostty-vt
+```
+
+Put `target/release/herdr` on `PATH` and restart Herdr: the client and the server are the same
+binary, and the patch bumps the wire protocol (`client protocol 23 is newer than server protocol 22`
+until both are restarted). Keep the stock binary around for the fallback lab
+(`HERDR_STABLE_BIN=… python3 scripts/lab-e2e-handoff.py`).
 
 ## 한국어 요약
 
 - `prefix+shift+s` 를 누르면 현재 pane의 **보이는 화면**을 캡처한 flash 피커가 전체화면 팝업으로 열립니다.
 - 검색어를 입력하면 일치하는 위치가 강조되고, **가장 가까운 최대 5개**에만 `a s d g h` 한 글자 힌트가 붙습니다.
-- 힌트를 누르면 커서가 그 위치로 이동하고, `v`/`V` 로 선택한 뒤 `y` 로 클립보드에 복사합니다(OSC 52).
-- 기존 `herdr-leap` 이 실패한 이유: 릴리스된 Herdr에 존재하지 않는 `pane.copy_mode_jump` API를 호출합니다
-  ([herdrdev/herdr#2249](https://github.com/herdrdev/herdr/issues/2249), not planned). Herdr의 copy mode는
-  클라이언트에 있고 플러그인이 커서를 옮길 공개 API가 없어서, 이 플러그인은 팝업 안에 자체 커서를 둡니다.
+- 힌트를 누르면 그 셀을 **Herdr 자체 copy mode** 로 넘깁니다(`pane.copy_mode_jump` 를 구현한 빌드에서: 팝업이 닫히고
+  커서가 그 위치에 놓이며, 이후 이동/검색/선택/복사는 Herdr copy mode 그대로입니다). 그 API가 없는 빌드에서는 같은
+  피커가 자체 copy 커서로 동작합니다(`v`/`V` 선택, `y` 복사, OSC 52).
+- 기존 `herdr-leap` 이 실패한 이유: 릴리스된 Herdr에 `pane.copy_mode_jump` 가 없습니다
+  ([herdrdev/herdr#2249](https://github.com/herdrdev/herdr/issues/2249), not planned). 이 저장소는 그 Herdr 패치를
+  `docs/herdr-copy-mode-jump.patch` 로 동봉하고, 패치된 Herdr 에서는 API를 그대로 사용합니다.
 - 힌트는 최대 5개로 제한됩니다(요구사항). 그보다 많은 일치 항목은 강조만 되고 라벨이 없으니 검색어를 더
   입력해 가까이 오게 하면 됩니다.
 
