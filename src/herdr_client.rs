@@ -96,11 +96,23 @@ impl SocketClient {
     }
 
     pub fn read_visible_pane(&mut self, pane_id: &str) -> Result<VisiblePane> {
+        self.read_pane(pane_id, "visible")
+    }
+
+    /// The pane's recent output as logical lines.
+    ///
+    /// `visible` returns wrapped *screen* rows, which cannot express where the terminal wrapped;
+    /// this read is the reference `Buffer::merge_soft_wraps` aligns against to recover soft wraps.
+    pub fn read_unwrapped_pane(&mut self, pane_id: &str) -> Result<VisiblePane> {
+        self.read_pane(pane_id, "recent_unwrapped")
+    }
+
+    fn read_pane(&mut self, pane_id: &str, source: &str) -> Result<VisiblePane> {
         let result = self.call(
             "pane.read",
             json!({
                 "pane_id": pane_id,
-                "source": "visible",
+                "source": source,
                 "format": "text",
                 "strip_ansi": true
             }),
@@ -201,6 +213,22 @@ mod tests {
         assert_eq!(request["params"]["pane_id"], "w1:p1");
         assert_eq!(request["params"]["source"], "visible");
         assert_eq!(request["params"]["strip_ansi"], true);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_unwrapped_pane_shapes_the_request() {
+        let body =
+            r#"{"id":"x","result":{"type":"pane_read","read":{"text":"one\ntwo","revision":8}}}"#;
+        let (path, server) = one_shot_server(body);
+        let mut client = SocketClient::connect(&path).unwrap();
+        let pane = client.read_unwrapped_pane("w1:p1").unwrap();
+        assert_eq!(pane.text, "one\ntwo");
+        assert_eq!(pane.revision, 8);
+        let request: Value = serde_json::from_str(&server.join().unwrap()).unwrap();
+        assert_eq!(request["method"], "pane.read");
+        assert_eq!(request["params"]["source"], "recent_unwrapped");
+        assert_eq!(request["params"]["format"], "text");
         let _ = std::fs::remove_file(path);
     }
 

@@ -331,6 +331,71 @@ impl Buffer {
         };
         self.extract_indices(start, end)
     }
+
+    /// Merge the visual rows that the pane soft-wrapped, using a reference grid built from the
+    /// pane's unwrapped text.
+    ///
+    /// `pane.read` with `source = "visible"` returns one hard line per *screen* row, so a wrap the
+    /// terminal made looks exactly like a real line break. The reference grid re-wraps the same
+    /// content at the same width and carries the true soft-wrap flags. It is walked from the bottom
+    /// up — the visible screen is the tail of the unwrapped read while the pane sits at the bottom —
+    /// and only a logical line whose every visual row matches is merged, so a stale, scrolled or
+    /// truncated reference degrades to the plain hard-line capture instead of corrupting positions.
+    ///
+    /// Returns the number of rows that became soft-wrap continuations.
+    pub fn merge_soft_wraps(&mut self, reference: &Buffer) -> usize {
+        let mut row = self.rows.len();
+        let mut reference_row = reference.rows.len();
+        let mut merged = 0;
+        while row > 0 && reference_row > 0 {
+            let mut first = reference_row - 1;
+            while first > 0 && !reference.rows[first].starts_line {
+                first -= 1;
+            }
+            let span = reference_row - first;
+            let mismatched = span > row
+                || (0..span).any(|offset| {
+                    self.row_text(row - span + offset) != reference.row_text(first + offset)
+                });
+            if mismatched {
+                break;
+            }
+            for offset in 1..span {
+                if !reference.rows[first + offset].starts_line {
+                    self.rows[row - span + offset].starts_line = false;
+                    merged += 1;
+                }
+            }
+            row -= span;
+            reference_row = first;
+        }
+        if merged > 0 {
+            self.rebuild_lines();
+        }
+        merged
+    }
+
+    /// Rebuild the logical-line index from the current soft-wrap flags.
+    fn rebuild_lines(&mut self) {
+        self.lines.clear();
+        if self.rows.is_empty() {
+            return;
+        }
+        let mut start = self.rows[0].start;
+        for (index, row) in self.rows.iter().enumerate() {
+            if index > 0 && row.starts_line {
+                self.lines.push(Line {
+                    start,
+                    end: row.start,
+                });
+                start = row.start;
+            }
+        }
+        self.lines.push(Line {
+            start,
+            end: self.cells.len(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -401,5 +466,40 @@ mod tests {
         let buffer = Buffer::from_text("가나다", None);
         assert_eq!(buffer.extract((0, 3), (0, 3)), "나");
         assert_eq!(buffer.row_cells(0), 6);
+    }
+
+    #[test]
+    fn merges_soft_wraps_confirmed_against_the_unwrapped_read() {
+        // The shape `pane.read source = "visible"` returns for a URL the terminal wrapped: 83 cells
+        // on the first screen row, the rest on the next, separated by a hard newline in the text.
+        let url = format!("{}{}", "a".repeat(83), "b".repeat(57));
+        let captured = format!("{}\n{}", "a".repeat(83), "b".repeat(57));
+        let mut buffer = Buffer::from_text(&captured, Some(83));
+        let reference = Buffer::from_text(&url, Some(83));
+        assert_eq!(buffer.merge_soft_wraps(&reference), 1);
+        assert_eq!(buffer.lines().len(), 1);
+        assert_eq!(buffer.extract((0, 0), (1, 56)), url);
+        assert_eq!(buffer.next_char(82), Some(83));
+    }
+
+    #[test]
+    fn only_fully_matched_logical_lines_are_merged() {
+        // The reference disagrees above the bottom logical line (stale or scrolled read), so the
+        // unmatched rows keep their hard breaks and the boundary never lands inside real text.
+        let mut buffer = Buffer::from_text("dif\nfer\nent\naaa\nbbb", Some(3));
+        let reference = Buffer::from_text("xxx\naaabbb", Some(3));
+        assert_eq!(buffer.merge_soft_wraps(&reference), 1);
+        assert_eq!(buffer.lines().len(), 4);
+        assert_eq!(buffer.extract((3, 0), (4, 2)), "aaabbb");
+        assert_eq!(buffer.extract((2, 0), (4, 2)), "ent\naaabbb");
+    }
+
+    #[test]
+    fn a_scrolled_reference_leaves_the_capture_alone() {
+        let mut buffer = Buffer::from_text("aa\nbb", Some(3));
+        let reference = Buffer::from_text("other\nrows", Some(3));
+        assert_eq!(buffer.merge_soft_wraps(&reference), 0);
+        assert_eq!(buffer.lines().len(), 2);
+        assert_eq!(buffer.extract((0, 0), (1, 1)), "aa\nbb");
     }
 }

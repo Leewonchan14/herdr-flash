@@ -117,8 +117,10 @@ status_fg = "gray"
 1. `prefix+shift+s` runs the `open` action → `scripts/open-flash` → `herdr plugin pane open --placement
    popup --width 100% --height 100%`.
 2. The popup reads the focused pane's **visible** buffer (`pane.read source=visible strip_ansi`),
-   plus the pane's layout width (`pane.layout`) for wrapping. The capture is frozen at open time, so
-   you always land on what you saw.
+   the pane's layout width (`pane.layout`) for wrapping, and its unwrapped output
+   (`source=recent_unwrapped`): the visible read returns *screen* rows, so a wrap the terminal made
+   is only joined when the unwrapped read confirms it, bottom up. The capture is frozen at open
+   time, so you always land on what you saw.
 3. Typing re-runs the matcher over the captured text and re-labels the five nearest hits.
 4. A hint key (or `Enter`) lands the picker's cursor on the match; motions and selections run on the
    captured grid.
@@ -134,6 +136,8 @@ unless you press `y`.
   the 0.9.x API can move the latter.
 - Capture is the visible viewport only; scrollback is out of scope (use Herdr's copy mode or a
   scrollback picker for that).
+- Soft wraps are joined only where the unwrapped read confirms them, so a pane scrolled away from
+  the bottom (or output changing between the two reads) degrades to hard screen rows.
 - Labels are single keys capped at five; there is no two-key fallback.
 - Wide (CJK) characters are handled by cell width; the label replaces a wide match start with
   `label + space` to keep the grid aligned.
